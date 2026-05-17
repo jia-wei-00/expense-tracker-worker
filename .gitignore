@@ -9,6 +9,10 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
+/worker/node_modules
+**/.dev.vars
+**/.wrangler
+**/wrangler.toml
 
 # testing
 /coverage
@@ -39,3 +43,5 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+

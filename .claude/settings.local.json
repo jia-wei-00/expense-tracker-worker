@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__supabase__list_projects",
+      "mcp__github__get_file_contents",
+      "mcp__supabase__list_tables",
+      "mcp__supabase__get_publishable_keys",
+      "mcp__supabase__get_project_url",
+      "Bash(npm install *)",
+      "Bash(npx shadcn@latest *)",
+      "Bash(npm run *)",
+      "Bash(node -e \"const pkg = require\\('./node_modules/@supabase/ssr/package.json'\\); console.log\\('ssr version:', pkg.version\\)\")",
+      "Bash(node -e \"const pkg = require\\('./node_modules/@supabase/supabase-js/package.json'\\); console.log\\('supabase-js version:', pkg.version\\)\")",
+      "mcp__supabase__get_project",
+      "mcp__supabase__execute_sql",
+      "mcp__supabase__get_logs",
+      "Bash(Get-ChildItem C:\\\\vscode\\\\my-app\\\\src\\\\components\\\\ui)",
+      "Bash(Select-Object -ExpandProperty Name)",
+      "WebFetch(domain:ui.shadcn.com)",
+      "Bash(Get-ChildItem -Path \"C:\\\\vscode\\\\my-app\\\\src\\\\components\\\\ui\" -Recurse -Include \"*.tsx\", \"*.ts\")",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(node *)",
+      "Bash(npx wrangler *)",
+      "Bash(fnm --version)",
+      "Bash(nvm --version)",
+      "Bash(volta --version)",
+      "Bash(Test-Path *)",
+      "Bash(dir \"C:\\\\vscode\\\\my-app\\\\worker\\\\src\" /s /b)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "supabase"
+  ]
+}
