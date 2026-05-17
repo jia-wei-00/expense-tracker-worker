@@ -6,6 +6,7 @@ import { QueryProvider } from "@/providers/query-provider";
 import { AuthProvider } from "@/providers/auth-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Analytics } from "@vercel/analytics/next";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -35,6 +36,7 @@ export default function RootLayout({
               <TooltipProvider>
                 {children}
                 <Toaster richColors position="top-right" />
+                <Analytics />
               </TooltipProvider>
             </QueryProvider>
           </AuthProvider>
