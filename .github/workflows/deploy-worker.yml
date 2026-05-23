@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
     paths:
-      - 'worker/**'
+      - "worker/**"
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -14,7 +15,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install worker dependencies
         run: npm ci
