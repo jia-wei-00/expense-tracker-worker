@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/providers/auth-provider";
@@ -24,7 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, Trash2, LogOut, User } from "lucide-react";
+import { Plus, Trash2, LogOut, User, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 
 export default function SettingsPage() {
@@ -41,6 +41,61 @@ export default function SettingsPage() {
   );
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+
+  const [whatsappNumber, setWhatsappNumber] = useState("");
+  const [savedWhatsappNumber, setSavedWhatsappNumber] = useState<string | null>(null);
+  const [savingWhatsapp, setSavingWhatsapp] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    supabase
+      .from("whatsapp_users")
+      .select("phone_number")
+      .eq("user_id", user.id)
+      .single()
+      .then(({ data }) => {
+        if (data) {
+          setSavedWhatsappNumber(data.phone_number as string);
+          setWhatsappNumber(data.phone_number as string);
+        }
+      });
+  }, [user]);
+
+  const handleSaveWhatsapp = async () => {
+    if (!user) return;
+    const normalized = whatsappNumber.replace(/\D/g, "");
+    if (!normalized) return;
+
+    setSavingWhatsapp(true);
+    // Remove any existing entry for this user then insert fresh (phone is PK)
+    await supabase.from("whatsapp_users").delete().eq("user_id", user.id);
+    const { error } = await supabase
+      .from("whatsapp_users")
+      .insert({ phone_number: normalized, user_id: user.id });
+
+    if (error) {
+      toast.error("Failed to save WhatsApp number.");
+    } else {
+      setSavedWhatsappNumber(normalized);
+      setWhatsappNumber(normalized);
+      toast.success("WhatsApp number linked.");
+    }
+    setSavingWhatsapp(false);
+  };
+
+  const handleRemoveWhatsapp = async () => {
+    if (!user) return;
+    setSavingWhatsapp(true);
+    const { error } = await supabase.from("whatsapp_users").delete().eq("user_id", user.id);
+    if (error) {
+      toast.error("Failed to remove WhatsApp number.");
+    } else {
+      setSavedWhatsappNumber(null);
+      setWhatsappNumber("");
+      toast.success("WhatsApp number removed.");
+    }
+    setSavingWhatsapp(false);
+  };
 
   const expenseCategories = categories.filter((c) => c.is_expense);
   const incomeCategories = categories.filter((c) => !c.is_expense);
@@ -89,6 +144,59 @@ export default function SettingsPage() {
             <LogOut />
             Sign Out
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* WhatsApp */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <MessageCircle className="size-4" />
+            WhatsApp
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <p className="text-sm text-muted-foreground">
+            Link your WhatsApp number to add and view expenses via chat.
+            Use the international format without the{" "}
+            <code className="bg-muted px-1 rounded text-xs">+</code> sign
+            (e.g. <code className="bg-muted px-1 rounded text-xs">60123456789</code>).
+          </p>
+          <div className="flex gap-2">
+            <Input
+              placeholder="60123456789"
+              value={whatsappNumber}
+              onChange={(e) => setWhatsappNumber(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSaveWhatsapp(); }}
+            />
+            <Button
+              onClick={handleSaveWhatsapp}
+              disabled={savingWhatsapp || !whatsappNumber.trim()}
+              size="sm"
+            >
+              {savingWhatsapp ? <Spinner /> : "Save"}
+            </Button>
+          </div>
+          {savedWhatsappNumber && (
+            <>
+              <Separator />
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">
+                  Linked: <span className="text-foreground font-medium">+{savedWhatsappNumber}</span>
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  onClick={handleRemoveWhatsapp}
+                  disabled={savingWhatsapp}
+                >
+                  <Trash2 className="size-3 mr-1" />
+                  Remove
+                </Button>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 

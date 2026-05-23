@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "worker": "npx wrangler dev --tunnel --config worker/wrangler.toml"
+    "worker": "npx wrangler dev --tunnel --config worker/wrangler.toml",
+    "types": "npx supabase gen types typescript --project-id ydpvxgjfcftaipcpirph > src/types/database.types.ts",
+    "deploy:worker": "npx wrangler deploy --config worker/wrangler.toml"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

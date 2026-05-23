@@ -1,10 +1,11 @@
 import OpenAI from "openai";
+import { TOOL_NAME } from "./constants";
 
 export const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "addExpense",
+      name: TOOL_NAME.ADD_EXPENSE,
       description:
         "Extract and return a complete expense or income record from the user's message. Fill every required field with normalized values.",
       parameters: {
@@ -49,7 +50,7 @@ export const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "deleteExpense",
+      name: TOOL_NAME.DELETE_EXPENSE,
       description: "Propose deleting an expense record by ID.",
       parameters: {
         type: "object",
@@ -64,7 +65,7 @@ export const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
-      name: "listExpenses",
+      name: TOOL_NAME.LIST_EXPENSES,
       description: "List the user's expenses with optional filters.",
       parameters: {
         type: "object",
