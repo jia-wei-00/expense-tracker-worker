@@ -6,7 +6,7 @@ import {
   parseAddExpenseArgs,
   parseDeleteExpenseArgs,
   formatCategoryList,
-  createOpenAIClient,
+  resolveAIConfig,
   isWriteToolName,
 } from "./utils";
 import {
@@ -16,7 +16,6 @@ import {
   downloadMetaMedia,
 } from "./whatsapp";
 import {
-  AI_MODEL,
   MAX_LLM_STEPS,
   DEFAULT_EXPENSE_LIMIT,
   PENDING_ACTION_TTL_MS,
@@ -27,9 +26,12 @@ import {
 } from "./constants";
 import type { Env } from "./index";
 import type { Category, PendingAction } from "./types";
-import type OpenAI from "openai";
+import OpenAI from "openai";
 
-export async function handleWhatsAppVerification(req: Request, env: Env): Promise<Response> {
+export async function handleWhatsAppVerification(
+  req: Request,
+  env: Env,
+): Promise<Response> {
   const url = new URL(req.url);
   const mode = url.searchParams.get("hub.mode");
   const token = url.searchParams.get("hub.verify_token");
@@ -41,14 +43,20 @@ export async function handleWhatsAppVerification(req: Request, env: Env): Promis
   return new Response("Forbidden", { status: 403 });
 }
 
-export async function handleWhatsAppMessage(req: Request, env: Env): Promise<Response> {
+export async function handleWhatsAppMessage(
+  req: Request,
+  env: Env,
+): Promise<Response> {
   const body = await req.json();
   const parsed = parseIncomingWebhook(body);
 
   // Always return 200 to Meta — non-200 causes it to retry and spam the endpoint
   if (!parsed) return new Response("OK", { status: 200 });
 
-  const supabase = createServiceClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = createServiceClient(
+    env.SUPABASE_URL,
+    env.SUPABASE_SERVICE_ROLE_KEY,
+  );
 
   const { data: linkedUser } = await supabase
     .from(DB_TABLE.WHATSAPP_USERS)
@@ -68,15 +76,39 @@ export async function handleWhatsAppMessage(req: Request, env: Env): Promise<Res
   const userId: string = linkedUser.user_id;
 
   if (parsed.type === "button_reply" && parsed.buttonId) {
-    await handleButtonReply(parsed.from, parsed.buttonId, userId, supabase, env);
+    await handleButtonReply(
+      parsed.from,
+      parsed.buttonId,
+      userId,
+      supabase,
+      env,
+    );
   } else if (parsed.type === "text" && parsed.text) {
     await runAgentLoop(parsed.from, parsed.text, userId, supabase, env);
   } else if (parsed.type === "audio" && parsed.mediaId) {
-    await handleMediaMessage(parsed.from, parsed.mediaId, undefined, userId, supabase, env);
+    await handleMediaMessage(
+      parsed.from,
+      parsed.mediaId,
+      undefined,
+      userId,
+      supabase,
+      env,
+    );
   } else if (parsed.type === "image" && parsed.mediaId) {
-    await handleMediaMessage(parsed.from, parsed.mediaId, parsed.caption, userId, supabase, env);
+    await handleMediaMessage(
+      parsed.from,
+      parsed.mediaId,
+      parsed.caption,
+      userId,
+      supabase,
+      env,
+    );
   } else if (parsed.type === "other") {
-    await sendTextMessage(parsed.from, "Sorry, I can only handle text, voice, and image messages.", env);
+    await sendTextMessage(
+      parsed.from,
+      "Sorry, I can only handle text, voice, and image messages.",
+      env,
+    );
   }
 
   return new Response("OK", { status: 200 });
@@ -93,11 +125,20 @@ async function handleButtonReply(
   const isCancel = buttonId.startsWith(BUTTON_PREFIX.CANCEL);
   if (!isConfirm && !isCancel) return;
 
-  const pendingId = buttonId.slice(isConfirm ? BUTTON_PREFIX.CONFIRM.length : BUTTON_PREFIX.CANCEL.length);
+  const pendingId = buttonId.slice(
+    isConfirm ? BUTTON_PREFIX.CONFIRM.length : BUTTON_PREFIX.CANCEL.length,
+  );
 
   if (isCancel) {
-    await supabase.from(DB_TABLE.WHATSAPP_PENDING_ACTIONS).delete().eq("id", pendingId);
-    await sendTextMessage(from, "Cancelled. Anything else I can help with?", env);
+    await supabase
+      .from(DB_TABLE.WHATSAPP_PENDING_ACTIONS)
+      .delete()
+      .eq("id", pendingId);
+    await sendTextMessage(
+      from,
+      "Cancelled. Anything else I can help with?",
+      env,
+    );
     return;
   }
 
@@ -110,11 +151,18 @@ async function handleButtonReply(
     .single();
 
   if (!pending) {
-    await sendTextMessage(from, "This action has expired. Please try again.", env);
+    await sendTextMessage(
+      from,
+      "This action has expired. Please try again.",
+      env,
+    );
     return;
   }
 
-  await supabase.from(DB_TABLE.WHATSAPP_PENDING_ACTIONS).delete().eq("id", pendingId);
+  await supabase
+    .from(DB_TABLE.WHATSAPP_PENDING_ACTIONS)
+    .delete()
+    .eq("id", pendingId);
 
   if (pending.tool_name === TOOL_NAME.ADD_EXPENSE) {
     const args = parseAddExpenseArgs(pending.args);
@@ -123,7 +171,9 @@ async function handleButtonReply(
       .insert({ ...args, user_id: userId });
     await sendTextMessage(
       from,
-      error ? "Failed to save. Please try again." : `Done! ${args.name} RM${args.amount} saved.`,
+      error
+        ? "Failed to save. Please try again."
+        : `Done! ${args.name} RM${args.amount} saved.`,
       env,
     );
   } else if (pending.tool_name === TOOL_NAME.DELETE_EXPENSE) {
@@ -154,7 +204,11 @@ async function handleMediaMessage(
   const content = buildMediaContent(mimeType, base64, caption);
 
   if (!content.length) {
-    await sendTextMessage(from, "Sorry, I couldn't process that media type. Try sending text instead.", env);
+    await sendTextMessage(
+      from,
+      "Sorry, I couldn't process that media type. Try sending text instead.",
+      env,
+    );
     return;
   }
 
@@ -169,10 +223,16 @@ function buildMediaContent(
   const parts: OpenAI.Chat.ChatCompletionContentPart[] = [];
 
   if (mimeType.startsWith("image/")) {
-    parts.push({ type: "image_url", image_url: { url: `data:${mimeType};base64,${base64}` } });
+    parts.push({
+      type: "image_url",
+      image_url: { url: `data:${mimeType};base64,${base64}` },
+    });
     if (caption) parts.push({ type: "text", text: caption });
   } else if (mimeType.startsWith("audio/")) {
-    parts.push({ type: "input_audio", input_audio: { data: base64, format: resolveAudioFormat(mimeType) } });
+    parts.push({
+      type: "input_audio",
+      input_audio: { data: base64, format: resolveAudioFormat(mimeType) },
+    });
   }
 
   return parts;
@@ -211,65 +271,93 @@ async function runAgentLoop(
   const email: string = userData?.user?.email ?? "";
   const categoryText = formatCategoryList((categories ?? []) as Category[]);
 
-  const openai = createOpenAIClient(env.OPENROUTER_API_KEY);
+  const { client: openai, model } = resolveAIConfig(env);
   const messages = promptMessage({
     email,
     categoryText,
     history: [{ role: "user", content: userContent }],
   });
 
-  for (let step = 0; step < MAX_LLM_STEPS; step++) {
-    const response = await openai.chat.completions.create({ model: AI_MODEL, messages, tools });
-    const msg = response.choices[0].message;
-    messages.push(msg);
+  try {
+    for (let step = 0; step < MAX_LLM_STEPS; step++) {
+      const response = await openai.chat.completions.create({
+        model,
+        messages,
+        tools,
+      });
+      const msg = response.choices[0].message;
+      messages.push(msg);
 
-    if (!msg.tool_calls?.length) {
-      if (msg.content) await sendTextMessage(from, msg.content, env);
-      break;
-    }
-
-    const toolResults: OpenAI.Chat.Completions.ChatCompletionToolMessageParam[] = [];
-    let pendingAction: PendingAction | null = null;
-
-    for (const tc of msg.tool_calls) {
-      const args = JSON.parse(tc.function.arguments ?? "{}") as Record<string, unknown>;
-
-      if (isWriteToolName(tc.function.name)) {
-        if (!pendingAction) {
-          if (tc.function.name === TOOL_NAME.ADD_EXPENSE) {
-            pendingAction = { toolName: tc.function.name, args: normalizeAddExpenseArgs(args) };
-          } else {
-            pendingAction = { toolName: tc.function.name, args: { id: Number(args.id) } };
-          }
-        }
-        toolResults.push({ role: "tool", tool_call_id: tc.id, content: PENDING_CONFIRMATION_REPLY });
-      } else if (tc.function.name === TOOL_NAME.LIST_EXPENSES) {
-        let query = supabase
-          .from(DB_TABLE.EXPENSE)
-          .select("id, name, amount, spend_date, is_expense, expense_category(name)")
-          .eq("user_id", userId)
-          .order("spend_date", { ascending: false })
-          .limit(Number(args.limit ?? DEFAULT_EXPENSE_LIMIT));
-
-        if (args.category) query = query.eq("category", Number(args.category));
-        if (args.from) query = query.gte("spend_date", String(args.from));
-        if (args.to) query = query.lte("spend_date", String(args.to));
-
-        const { data, error } = await query;
-        toolResults.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify(error ? { error: error.message } : data),
-        });
+      if (!msg.tool_calls?.length) {
+        if (msg.content) await sendTextMessage(from, msg.content, env);
+        break;
       }
-    }
 
-    if (pendingAction) {
-      await savePendingAndAskConfirmation(from, pendingAction, supabase, env);
-      break;
-    }
+      const toolResults: OpenAI.Chat.Completions.ChatCompletionToolMessageParam[] =
+        [];
+      let pendingAction: PendingAction | null = null;
 
-    messages.push(...toolResults);
+      for (const tc of msg.tool_calls) {
+        const args = JSON.parse(tc.function.arguments ?? "{}") as Record<
+          string,
+          unknown
+        >;
+
+        if (isWriteToolName(tc.function.name)) {
+          if (!pendingAction) {
+            if (tc.function.name === TOOL_NAME.ADD_EXPENSE) {
+              pendingAction = {
+                toolName: tc.function.name,
+                args: normalizeAddExpenseArgs(args),
+              };
+            } else {
+              pendingAction = {
+                toolName: tc.function.name,
+                args: { id: Number(args.id) },
+              };
+            }
+          }
+          toolResults.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: PENDING_CONFIRMATION_REPLY,
+          });
+        } else if (tc.function.name === TOOL_NAME.LIST_EXPENSES) {
+          let query = supabase
+            .from(DB_TABLE.EXPENSE)
+            .select(
+              "id, name, amount, spend_date, is_expense, expense_category(name)",
+            )
+            .eq("user_id", userId)
+            .order("spend_date", { ascending: false })
+            .limit(Number(args.limit ?? DEFAULT_EXPENSE_LIMIT));
+
+          if (args.category) query = query.eq("category", Number(args.category));
+          if (args.from) query = query.gte("spend_date", String(args.from));
+          if (args.to) query = query.lte("spend_date", String(args.to));
+
+          const { data, error } = await query;
+          toolResults.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify(error ? { error: error.message } : data),
+          });
+        }
+      }
+
+      if (pendingAction) {
+        await savePendingAndAskConfirmation(from, pendingAction, supabase, env);
+        break;
+      }
+
+      messages.push(...toolResults);
+    }
+  } catch (err) {
+    if (err instanceof OpenAI.RateLimitError) {
+      await sendTextMessage(from, "Sorry, the AI is currently rate limited. Please try again in a moment.", env);
+      return;
+    }
+    throw err;
   }
 }
 
@@ -283,15 +371,21 @@ async function savePendingAndAskConfirmation(
 
   const { data: inserted } = await supabase
     .from(DB_TABLE.WHATSAPP_PENDING_ACTIONS)
-    .insert({ phone_number: from, tool_name: action.toolName, args: action.args, expires_at: expiresAt })
+    .insert({
+      phone_number: from,
+      tool_name: action.toolName,
+      args: action.args,
+      expires_at: expiresAt,
+    })
     .select("id")
     .single();
 
   const pendingId: string = inserted?.id ?? "";
 
-  const confirmText = action.toolName === TOOL_NAME.ADD_EXPENSE
-    ? `Add "${action.args.name}" RM${action.args.amount}?`
-    : `Delete expense #${action.args.id}?`;
+  const confirmText =
+    action.toolName === TOOL_NAME.ADD_EXPENSE
+      ? `Add "${action.args.name}" RM${action.args.amount}?`
+      : `Delete expense #${action.args.id}?`;
 
   await sendInteractiveButtons(
     from,

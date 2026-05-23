@@ -7,9 +7,11 @@ compatibility_flags = ["nodejs_compat"]
 SUPABASE_URL = "https://ydpvxgjfcftaipcpirph.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlkcHZ4Z2pmY2Z0YWlwY3BpcnBoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzE4MjE1MzYsImV4cCI6MjA0NzM5NzUzNn0.yuxmXqf3CmdscasibvJcMKEyFneflhIXvD7FgSOHeoo"
 ALLOWED_ORIGIN = ""
+AI_PROVIDER = "gemini"   # "openrouter" | "gemini"
 
 # Secrets — set once via: npx wrangler secret put <NAME> --config worker/wrangler.toml
 # OPENROUTER_API_KEY
+# GEMINI_API_KEY
 # SUPABASE_SERVICE_ROLE_KEY
 # WHATSAPP_VERIFY_TOKEN
 # WHATSAPP_ACCESS_TOKEN

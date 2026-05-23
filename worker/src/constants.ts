@@ -1,5 +1,8 @@
 export const AI_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free";
+export const GEMINI_MODEL = "gemini-3.1-flash-lite";
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+export const GEMINI_BASE_URL =
+  "https://generativelanguage.googleapis.com/v1beta/openai/";
 
 export const MAX_LLM_STEPS = 3;
 export const DEFAULT_EXPENSE_LIMIT = 10;
@@ -24,4 +27,7 @@ export const DB_TABLE = {
   WHATSAPP_PENDING_ACTIONS: "whatsapp_pending_actions",
 } as const;
 
-export const WRITE_TOOLS = [TOOL_NAME.ADD_EXPENSE, TOOL_NAME.DELETE_EXPENSE] as const;
+export const WRITE_TOOLS = [
+  TOOL_NAME.ADD_EXPENSE,
+  TOOL_NAME.DELETE_EXPENSE,
+] as const;
