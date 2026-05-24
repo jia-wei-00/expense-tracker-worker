@@ -74,32 +74,112 @@ export default {
     }
 
     if (pathname === "/whatsapp/link") {
-      if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405, cors);
+      if (req.method !== "POST")
+        return jsonResponse({ error: "Method not allowed" }, 405, cors);
 
       const authHeader = req.headers.get("Authorization");
-      if (!authHeader?.startsWith("Bearer ")) return jsonResponse({ error: "Unauthorized" }, 401, cors);
+      if (!authHeader?.startsWith("Bearer "))
+        return jsonResponse({ error: "Unauthorized" }, 401, cors);
 
       try {
         const accessToken = authHeader.slice("Bearer ".length);
-        const supabase = createSupabaseClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, accessToken);
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        if (authError || !user) return jsonResponse({ error: "Unauthorized" }, 401, cors);
+        const supabase = createSupabaseClient(
+          env.SUPABASE_URL,
+          env.SUPABASE_ANON_KEY,
+          accessToken,
+        );
+        const {
+          data: { user },
+          error: authError,
+        } = await supabase.auth.getUser();
+        if (authError || !user)
+          return jsonResponse({ error: "Unauthorized" }, 401, cors);
 
-        const body = await req.json() as { phoneNumber?: string };
+        const body = (await req.json()) as { phoneNumber?: string };
         const phoneNumber = body?.phoneNumber?.replace(/\D/g, "");
-        if (!phoneNumber) return jsonResponse({ error: "phoneNumber is required" }, 400, cors);
+        if (!phoneNumber)
+          return jsonResponse({ error: "phoneNumber is required" }, 400, cors);
 
-        const serviceSupabase = createServiceClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
-        await serviceSupabase.from(DB_TABLE.WHATSAPP_USERS).delete().eq("user_id", user.id);
+        const serviceSupabase = createServiceClient(
+          env.SUPABASE_URL,
+          env.SUPABASE_SERVICE_ROLE_KEY,
+        );
+        await serviceSupabase
+          .from(DB_TABLE.WHATSAPP_USERS)
+          .delete()
+          .eq("user_id", user.id);
         const { error: insertError } = await serviceSupabase
           .from(DB_TABLE.WHATSAPP_USERS)
-          .insert({ phone_number: phoneNumber, user_id: user.id, is_verified: false });
+          .insert({
+            phone_number: phoneNumber,
+            user_id: user.id,
+            is_verified: false,
+          });
 
-        if (insertError) return jsonResponse({ error: "Failed to save number" }, 500, cors);
+        if (insertError)
+          return jsonResponse({ error: "Failed to save number" }, 500, cors);
 
-        await sendTemplateVerification(phoneNumber, user.id, env.WHATSAPP_TEMPLATE_NAME, env);
+        await sendTemplateVerification(
+          phoneNumber,
+          user.id,
+          env.WHATSAPP_TEMPLATE_NAME,
+          env,
+        );
 
         return jsonResponse({ message: "Verification sent" }, 200, cors);
+      } catch (err) {
+        console.error(err);
+        return jsonResponse({ error: "Internal server error" }, 500, cors);
+      }
+    }
+
+    if (pathname === "/whatsapp/resend-verification") {
+      if (req.method !== "POST")
+        return jsonResponse({ error: "Method not allowed" }, 405, cors);
+
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader?.startsWith("Bearer "))
+        return jsonResponse({ error: "Unauthorized" }, 401, cors);
+
+      try {
+        const accessToken = authHeader.slice("Bearer ".length);
+        const supabase = createSupabaseClient(
+          env.SUPABASE_URL,
+          env.SUPABASE_ANON_KEY,
+          accessToken,
+        );
+        const {
+          data: { user },
+          error: authError,
+        } = await supabase.auth.getUser();
+        if (authError || !user)
+          return jsonResponse({ error: "Unauthorized" }, 401, cors);
+
+        const serviceSupabase = createServiceClient(
+          env.SUPABASE_URL,
+          env.SUPABASE_SERVICE_ROLE_KEY,
+        );
+        const { data: existing } = await serviceSupabase
+          .from(DB_TABLE.WHATSAPP_USERS)
+          .select("phone_number, is_verified")
+          .eq("user_id", user.id)
+          .single();
+
+        console.log(user.id);
+
+        if (!existing)
+          return jsonResponse({ error: "No phone number linked" }, 404, cors);
+        if (existing.is_verified)
+          return jsonResponse({ error: "Number is already verified" }, 409, cors);
+
+        await sendTemplateVerification(
+          existing.phone_number,
+          user.id,
+          env.WHATSAPP_TEMPLATE_NAME,
+          env,
+        );
+
+        return jsonResponse({ message: "Verification resent" }, 200, cors);
       } catch (err) {
         console.error(err);
         return jsonResponse({ error: "Internal server error" }, 500, cors);
@@ -241,7 +321,11 @@ export default {
       );
     } catch (err) {
       if (err instanceof OpenAI.RateLimitError) {
-        return jsonResponse({ error: "AI rate limit reached. Please try again in a moment." }, 429, cors);
+        return jsonResponse(
+          { error: "AI rate limit reached. Please try again in a moment." },
+          429,
+          cors,
+        );
       }
       console.error(err);
       return jsonResponse({ error: "Internal server error" }, 500, cors);

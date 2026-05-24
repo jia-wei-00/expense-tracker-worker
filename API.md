@@ -58,6 +58,38 @@ Link a WhatsApp phone number to the authenticated user's account. Sends a verifi
 
 ---
 
+## POST `/whatsapp/resend-verification`
+
+Resend the verification template message to the user's linked WhatsApp number. Only works if the number exists and is not yet verified.
+
+**Auth**: Required
+
+**Request body**: None
+
+**Response `200`**
+```json
+{
+  "message": "Verification resent"
+}
+```
+
+**Response `404`** — no number linked for this user
+```json
+{ "error": "No phone number linked" }
+```
+
+**Response `409`** — number already verified, resend not needed
+```json
+{ "error": "Number is already verified" }
+```
+
+**Response `401`**
+```json
+{ "error": "Unauthorized" }
+```
+
+---
+
 ## POST `/chat`
 
 Send a message to the AI agent. The agent can read expenses, add new ones, and delete existing ones. Write operations (add/delete) return `pendingToolCalls` for the client to confirm before executing.

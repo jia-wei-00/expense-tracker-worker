@@ -89,6 +89,25 @@ export default function SettingsPage() {
     setSavingWhatsapp(false);
   };
 
+  const handleResendVerification = async () => {
+    if (!user) return;
+    setSavingWhatsapp(true);
+    const session = await supabase.auth.getSession();
+    const token = session.data.session?.access_token;
+
+    const res = await fetch(`${process.env.NEXT_PUBLIC_WORKER_URL}/whatsapp/resend-verification`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      toast.error("Failed to resend verification.");
+    } else {
+      toast.success("Verification message resent to your WhatsApp.");
+    }
+    setSavingWhatsapp(false);
+  };
+
   const handleRemoveWhatsapp = async () => {
     if (!user) return;
     setSavingWhatsapp(true);
@@ -194,7 +213,16 @@ export default function SettingsPage() {
                   {isVerified ? (
                     <Badge variant="secondary" className="w-fit text-xs text-green-600">Verified</Badge>
                   ) : (
-                    <Badge variant="outline" className="w-fit text-xs text-yellow-600">Pending verification</Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="w-fit text-xs text-yellow-600">Pending verification</Badge>
+                      <button
+                        onClick={handleResendVerification}
+                        disabled={savingWhatsapp}
+                        className="text-xs text-muted-foreground underline hover:text-foreground disabled:opacity-50"
+                      >
+                        Resend
+                      </button>
+                    </div>
                   )}
                 </div>
                 <Button

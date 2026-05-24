@@ -68,10 +68,15 @@ export async function handleWhatsAppMessage(
     env.SUPABASE_SERVICE_ROLE_KEY,
   );
 
-  if (parsed.type === "button_reply" && parsed.buttonId?.startsWith(VERIFY_PAYLOAD_PREFIX)) {
+  if (
+    parsed.type === "button_reply" &&
+    parsed.buttonId?.startsWith(VERIFY_PAYLOAD_PREFIX)
+  ) {
     await handleLinkReply(parsed.from, parsed.buttonId, supabase, env);
     return new Response("OK", { status: 200 });
   }
+
+  console.log(parsed);
 
   const { data: linkedUser } = await supabase
     .from(DB_TABLE.WHATSAPP_USERS)
@@ -378,7 +383,8 @@ async function runAgentLoop(
             .order("spend_date", { ascending: false })
             .limit(Number(args.limit ?? DEFAULT_EXPENSE_LIMIT));
 
-          if (args.category) query = query.eq("category", Number(args.category));
+          if (args.category)
+            query = query.eq("category", Number(args.category));
           if (args.from) query = query.gte("spend_date", String(args.from));
           if (args.to) query = query.lte("spend_date", String(args.to));
 
@@ -400,7 +406,11 @@ async function runAgentLoop(
     }
   } catch (err) {
     if (err instanceof OpenAI.RateLimitError) {
-      await sendTextMessage(from, "Sorry, the AI is currently rate limited. Please try again in a moment.", env);
+      await sendTextMessage(
+        from,
+        "Sorry, the AI is currently rate limited. Please try again in a moment.",
+        env,
+      );
       return;
     }
     throw err;
