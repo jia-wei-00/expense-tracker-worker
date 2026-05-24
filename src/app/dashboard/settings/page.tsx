@@ -44,19 +44,21 @@ export default function SettingsPage() {
 
   const [whatsappNumber, setWhatsappNumber] = useState("");
   const [savedWhatsappNumber, setSavedWhatsappNumber] = useState<string | null>(null);
+  const [isVerified, setIsVerified] = useState(false);
   const [savingWhatsapp, setSavingWhatsapp] = useState(false);
 
   useEffect(() => {
     if (!user) return;
     supabase
       .from("whatsapp_users")
-      .select("phone_number")
+      .select("phone_number, is_verified")
       .eq("user_id", user.id)
       .single()
       .then(({ data }) => {
         if (data) {
           setSavedWhatsappNumber(data.phone_number as string);
           setWhatsappNumber(data.phone_number as string);
+          setIsVerified(data.is_verified as boolean);
         }
       });
   }, [user]);
@@ -67,18 +69,22 @@ export default function SettingsPage() {
     if (!normalized) return;
 
     setSavingWhatsapp(true);
-    // Remove any existing entry for this user then insert fresh (phone is PK)
-    await supabase.from("whatsapp_users").delete().eq("user_id", user.id);
-    const { error } = await supabase
-      .from("whatsapp_users")
-      .insert({ phone_number: normalized, user_id: user.id });
+    const session = await supabase.auth.getSession();
+    const token = session.data.session?.access_token;
 
-    if (error) {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_WORKER_URL}/whatsapp/link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ phoneNumber: normalized }),
+    });
+
+    if (!res.ok) {
       toast.error("Failed to save WhatsApp number.");
     } else {
       setSavedWhatsappNumber(normalized);
       setWhatsappNumber(normalized);
-      toast.success("WhatsApp number linked.");
+      setIsVerified(false);
+      toast.success("Verification message sent to your WhatsApp.");
     }
     setSavingWhatsapp(false);
   };
@@ -181,9 +187,16 @@ export default function SettingsPage() {
             <>
               <Separator />
               <div className="flex items-center justify-between">
-                <p className="text-sm text-muted-foreground">
-                  Linked: <span className="text-foreground font-medium">+{savedWhatsappNumber}</span>
-                </p>
+                <div className="flex flex-col gap-0.5">
+                  <p className="text-sm text-muted-foreground">
+                    Linked: <span className="text-foreground font-medium">+{savedWhatsappNumber}</span>
+                  </p>
+                  {isVerified ? (
+                    <Badge variant="secondary" className="w-fit text-xs text-green-600">Verified</Badge>
+                  ) : (
+                    <Badge variant="outline" className="w-fit text-xs text-yellow-600">Pending verification</Badge>
+                  )}
+                </div>
                 <Button
                   variant="ghost"
                   size="sm"

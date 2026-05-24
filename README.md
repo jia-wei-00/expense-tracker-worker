@@ -17,15 +17,15 @@ A full-stack expense tracking application with an AI-powered chat agent. Built w
 
 ## Tech Stack
 
-| Layer          | Technology                                      |
-| -------------- | ----------------------------------------------- |
-| Frontend       | Next.js 16, React 19, TypeScript                |
-| Styling        | Tailwind CSS v4, shadcn/ui, Radix UI            |
-| State / Data   | TanStack Query, React Hook Form, Zod            |
-| Backend / Auth | Supabase (Postgres + Auth)                      |
-| AI Worker      | Cloudflare Workers, OpenRouter API (nvidia omni)|
-| Messaging      | Meta WhatsApp Cloud API                         |
-| Analytics      | Vercel Analytics                                |
+| Layer          | Technology                                       |
+| -------------- | ------------------------------------------------ |
+| Frontend       | Next.js 16, React 19, TypeScript                 |
+| Styling        | Tailwind CSS v4, shadcn/ui, Radix UI             |
+| State / Data   | TanStack Query, React Hook Form, Zod             |
+| Backend / Auth | Supabase (Postgres + Auth)                       |
+| AI Worker      | Cloudflare Workers, OpenRouter / Gemini via OpenAI-compatible API |
+| Messaging      | Meta WhatsApp Cloud API                          |
+| Analytics      | Vercel Analytics                                 |
 
 ## Project Structure
 
@@ -48,9 +48,9 @@ A full-stack expense tracking application with an AI-powered chat agent. Built w
 │   └── types/
 └── worker/                     # Cloudflare Worker (AI backend)
     └── src/
-        ├── index.ts            # Worker entry point + /chat route
+        ├── index.ts            # Worker entry point + /chat + /whatsapp/link routes
         ├── whatsapp-handler.ts # WhatsApp webhook handlers
-        ├── whatsapp.ts         # Meta WhatsApp Cloud API helpers
+        ├── whatsapp.ts         # Meta WhatsApp Cloud API helpers + signature verification
         ├── tools.ts            # AI tool definitions
         ├── constants.ts        # Shared constants and magic values
         ├── types.ts            # Shared TypeScript types
@@ -63,7 +63,7 @@ A full-stack expense tracking application with an AI-powered chat agent. Built w
 
 - Node.js 18+
 - A [Supabase](https://supabase.com) project
-- An [OpenRouter](https://openrouter.ai) API key
+- An [OpenRouter](https://openrouter.ai) API key or a [Google AI](https://aistudio.google.com) Gemini API key
 - A [Meta Developer](https://developers.facebook.com) app with WhatsApp Cloud API enabled (optional)
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) for the Cloudflare Worker
 
@@ -95,16 +95,24 @@ Update `worker/wrangler.toml` vars:
 SUPABASE_URL = "your_supabase_project_url"
 SUPABASE_ANON_KEY = "your_supabase_anon_key"
 ALLOWED_ORIGIN = "https://your-frontend-domain.com"
+AI_PROVIDER = "openrouter"   # "openrouter" | "gemini"
 ```
 
-Set secrets once via Wrangler:
+Set secrets once via Wrangler (only set what you need based on `AI_PROVIDER`):
 
 ```bash
+# AI provider — set one depending on AI_PROVIDER value
 npx wrangler secret put OPENROUTER_API_KEY --config worker/wrangler.toml
+npx wrangler secret put GEMINI_API_KEY --config worker/wrangler.toml
+
+# Supabase
 npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --config worker/wrangler.toml
+
+# WhatsApp (optional — only needed if using the WhatsApp bot)
 npx wrangler secret put WHATSAPP_VERIFY_TOKEN --config worker/wrangler.toml
 npx wrangler secret put WHATSAPP_ACCESS_TOKEN --config worker/wrangler.toml
 npx wrangler secret put WHATSAPP_PHONE_NUMBER_ID --config worker/wrangler.toml
+npx wrangler secret put WHATSAPP_APP_SECRET --config worker/wrangler.toml
 ```
 
 ### 4. Run the development servers
@@ -122,10 +130,40 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 ## WhatsApp Setup
 
 1. Create a Meta Developer app and enable WhatsApp Cloud API
-2. In the app settings, add a WhatsApp phone number
-3. Set the webhook URL to `https://your-worker.workers.dev/whatsapp` and use the same value as `WHATSAPP_VERIFY_TOKEN`
-4. Link your WhatsApp number in the app under **Settings → WhatsApp**
-5. Send text, voice, or image messages to start tracking expenses
+2. Add a WhatsApp phone number in the app settings
+3. Set the webhook URL to `https://your-worker.workers.dev/whatsapp`
+4. Set the verify token to the same value as `WHATSAPP_VERIFY_TOKEN`
+5. Get your **App Secret** from Meta Developer Console → App Settings → Basic → Show
+6. Link your WhatsApp number in the app under **Settings → WhatsApp** — a verification message will be sent to that number
+7. Tap **Confirm** in WhatsApp to verify and activate the bot
+8. Send text, voice, or image messages to start tracking expenses
+
+### WhatsApp number verification flow
+
+When you save a phone number in Settings:
+1. The worker inserts the number as **pending** (`is_verified = false`)
+2. A WhatsApp message is sent to the number with Confirm / Cancel buttons
+3. Tapping **Confirm** sets `is_verified = true` and activates the bot
+4. Tapping **Cancel** removes the number
+
+Unverified numbers receive a "pending verification" message and cannot use the bot.
+
+## Security
+
+| Endpoint | Protection |
+|---|---|
+| `POST /chat` | Supabase JWT (Bearer token) |
+| `POST /whatsapp/link` | Supabase JWT (Bearer token) |
+| `GET /whatsapp` | Webhook verify token |
+| `POST /whatsapp` | Meta HMAC-SHA256 signature (`X-Hub-Signature-256`) |
+
+## Switching AI Provider
+
+Change `AI_PROVIDER` in `worker/wrangler.toml` and redeploy — no code changes needed:
+
+```toml
+AI_PROVIDER = "gemini"   # or "openrouter"
+```
 
 ## Deployment
 
@@ -143,7 +181,7 @@ To deploy manually:
 npm run deploy:worker
 ```
 
-### Useful scripts
+## Useful Scripts
 
 | Script | Description |
 |---|---|

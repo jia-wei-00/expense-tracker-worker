@@ -35,7 +35,8 @@
       "Bash(xargs '-I{}' sh -c ' *)",
       "Bash(xargs grep -l \"input_audio\")",
       "Bash(Remove-Item *)",
-      "PowerShell(New-Item *)"
+      "PowerShell(New-Item *)",
+      "mcp__supabase__apply_migration"
     ]
   },
   "enabledMcpjsonServers": [

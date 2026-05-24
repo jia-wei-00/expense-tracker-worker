@@ -37,6 +37,8 @@ export interface MetaWebhookMessage {
     type: string;
     button_reply?: { id: string; title: string };
   };
+  // template quick reply button
+  button?: { text: string; payload: string };
   audio?: { id: string; mime_type: string };
   image?: { id: string; mime_type: string; caption?: string };
 }

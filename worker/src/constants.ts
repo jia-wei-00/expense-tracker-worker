@@ -20,6 +20,8 @@ export const BUTTON_PREFIX = {
   CANCEL: "cancel_",
 } as const;
 
+export const VERIFY_PAYLOAD_PREFIX = "verify_";
+
 export const DB_TABLE = {
   EXPENSE: "expense",
   EXPENSE_CATEGORY: "expense_category",

@@ -10,6 +10,8 @@ import {
   handleWhatsAppVerification,
   handleWhatsAppMessage,
 } from "./whatsapp-handler";
+import { sendTemplateVerification } from "./whatsapp";
+import { createServiceClient } from "./supabase";
 import {
   MAX_LLM_STEPS,
   DEFAULT_EXPENSE_LIMIT,
@@ -31,6 +33,8 @@ export interface Env {
   WHATSAPP_VERIFY_TOKEN: string;
   WHATSAPP_ACCESS_TOKEN: string;
   WHATSAPP_PHONE_NUMBER_ID: string;
+  WHATSAPP_APP_SECRET: string;
+  WHATSAPP_TEMPLATE_NAME: string;
 }
 
 function corsHeaders(origin: string, allowedOrigin: string) {
@@ -67,6 +71,39 @@ export default {
       if (req.method === "GET") return handleWhatsAppVerification(req, env);
       if (req.method === "POST") return handleWhatsAppMessage(req, env);
       return jsonResponse({ error: "Method not allowed" }, 405, cors);
+    }
+
+    if (pathname === "/whatsapp/link") {
+      if (req.method !== "POST") return jsonResponse({ error: "Method not allowed" }, 405, cors);
+
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader?.startsWith("Bearer ")) return jsonResponse({ error: "Unauthorized" }, 401, cors);
+
+      try {
+        const accessToken = authHeader.slice("Bearer ".length);
+        const supabase = createSupabaseClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, accessToken);
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
+        if (authError || !user) return jsonResponse({ error: "Unauthorized" }, 401, cors);
+
+        const body = await req.json() as { phoneNumber?: string };
+        const phoneNumber = body?.phoneNumber?.replace(/\D/g, "");
+        if (!phoneNumber) return jsonResponse({ error: "phoneNumber is required" }, 400, cors);
+
+        const serviceSupabase = createServiceClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+        await serviceSupabase.from(DB_TABLE.WHATSAPP_USERS).delete().eq("user_id", user.id);
+        const { error: insertError } = await serviceSupabase
+          .from(DB_TABLE.WHATSAPP_USERS)
+          .insert({ phone_number: phoneNumber, user_id: user.id, is_verified: false });
+
+        if (insertError) return jsonResponse({ error: "Failed to save number" }, 500, cors);
+
+        await sendTemplateVerification(phoneNumber, user.id, env.WHATSAPP_TEMPLATE_NAME, env);
+
+        return jsonResponse({ message: "Verification sent" }, 200, cors);
+      } catch (err) {
+        console.error(err);
+        return jsonResponse({ error: "Internal server error" }, 500, cors);
+      }
     }
 
     if (pathname !== "/chat") {

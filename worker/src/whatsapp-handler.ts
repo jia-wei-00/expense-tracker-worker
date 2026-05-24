@@ -14,6 +14,7 @@ import {
   sendInteractiveButtons,
   parseIncomingWebhook,
   downloadMetaMedia,
+  verifyMetaSignature,
 } from "./whatsapp";
 import {
   MAX_LLM_STEPS,
@@ -23,6 +24,7 @@ import {
   TOOL_NAME,
   BUTTON_PREFIX,
   DB_TABLE,
+  VERIFY_PAYLOAD_PREFIX,
 } from "./constants";
 import type { Env } from "./index";
 import type { Category, PendingAction } from "./types";
@@ -47,7 +49,15 @@ export async function handleWhatsAppMessage(
   req: Request,
   env: Env,
 ): Promise<Response> {
-  const body = await req.json();
+  const rawBody = await req.arrayBuffer();
+  const valid = await verifyMetaSignature(
+    rawBody,
+    req.headers.get("X-Hub-Signature-256"),
+    env.WHATSAPP_APP_SECRET,
+  );
+  if (!valid) return new Response("Forbidden", { status: 403 });
+
+  const body = JSON.parse(new TextDecoder().decode(rawBody));
   const parsed = parseIncomingWebhook(body);
 
   // Always return 200 to Meta — non-200 causes it to retry and spam the endpoint
@@ -58,9 +68,14 @@ export async function handleWhatsAppMessage(
     env.SUPABASE_SERVICE_ROLE_KEY,
   );
 
+  if (parsed.type === "button_reply" && parsed.buttonId?.startsWith(VERIFY_PAYLOAD_PREFIX)) {
+    await handleLinkReply(parsed.from, parsed.buttonId, supabase, env);
+    return new Response("OK", { status: 200 });
+  }
+
   const { data: linkedUser } = await supabase
     .from(DB_TABLE.WHATSAPP_USERS)
-    .select("user_id")
+    .select("user_id, is_verified")
     .eq("phone_number", parsed.from)
     .single();
 
@@ -68,6 +83,15 @@ export async function handleWhatsAppMessage(
     await sendTextMessage(
       parsed.from,
       "Your number is not linked to an account. Please add it in the app settings.",
+      env,
+    );
+    return new Response("OK", { status: 200 });
+  }
+
+  if (!linkedUser.is_verified) {
+    await sendTextMessage(
+      parsed.from,
+      "Your number is pending verification. Please check your WhatsApp for the verification message.",
       env,
     );
     return new Response("OK", { status: 200 });
@@ -112,6 +136,28 @@ export async function handleWhatsAppMessage(
   }
 
   return new Response("OK", { status: 200 });
+}
+
+async function handleLinkReply(
+  from: string,
+  payload: string,
+  supabase: SupabaseClient,
+  env: Env,
+) {
+  const userId = payload.slice(VERIFY_PAYLOAD_PREFIX.length);
+  const { error } = await supabase
+    .from(DB_TABLE.WHATSAPP_USERS)
+    .update({ is_verified: true })
+    .eq("phone_number", from)
+    .eq("user_id", userId);
+
+  await sendTextMessage(
+    from,
+    error
+      ? "Verification failed. Please try again from the app settings."
+      : "Your number is verified! You can now use the expense tracker via WhatsApp.",
+    env,
+  );
 }
 
 async function handleButtonReply(
