@@ -1,33 +1,6 @@
-import type OpenAI from "openai";
+import { z } from "zod";
 
-export interface Category {
-  id: number;
-  name: string;
-  is_expense: boolean;
-}
-
-export interface AddExpenseArgs {
-  name: string;
-  amount: number;
-  category: number;
-  is_expense: boolean;
-  spend_date: string;
-}
-
-export interface DeleteExpenseArgs {
-  id: number;
-}
-
-export type PendingAction =
-  | { toolName: "addExpense"; args: AddExpenseArgs }
-  | { toolName: "deleteExpense"; args: DeleteExpenseArgs };
-
-export interface ChatRequestBody {
-  messages: OpenAI.Chat.ChatCompletionMessageParam[];
-  analyticsMode?: boolean;
-}
-
-// Meta WhatsApp Cloud API webhook payload shape
+// Meta WhatsApp Cloud API webhook payload
 // https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks/payload-examples
 export interface MetaWebhookMessage {
   from: string;
@@ -37,7 +10,6 @@ export interface MetaWebhookMessage {
     type: string;
     button_reply?: { id: string; title: string };
   };
-  // template quick reply button
   button?: { text: string; payload: string };
   audio?: { id: string; mime_type: string };
   image?: { id: string; mime_type: string; caption?: string };
@@ -67,3 +39,9 @@ export interface WhatsAppButton {
   id: string;
   title: string;
 }
+
+export const linkPhoneRequestSchema = z.object({
+  phoneNumber: z.string().min(1, "phoneNumber is required"),
+});
+
+export type LinkPhoneRequest = z.infer<typeof linkPhoneRequestSchema>;

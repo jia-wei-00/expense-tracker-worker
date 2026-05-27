@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { TOOL_NAME } from "./constants";
+import { TOOL_NAME } from "../constants/ai";
 
 export const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
@@ -79,35 +79,57 @@ export const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
       },
     },
   },
-];
-
-export const promptMessage = ({
-  categoryText,
-  email,
-  history,
-}: {
-  categoryText: string;
-  email: string;
-  history: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
-}): OpenAI.Chat.Completions.ChatCompletionMessageParam[] => {
-  return [
-    {
-      role: "system",
-      content: `You are a friendly expense tracking assistant for ${email}.
-Today is ${new Date().toLocaleDateString("en-MY", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.
-Currency is MYR (Malaysian Ringgit).
-The user's available categories:
-${categoryText}
-
-Rules:
-- Always use the category ID (number) when calling tools, not the name.
-- Match the user's description to the closest category.
-- If unsure which category fits, ask for clarification.
-- For ADD or DELETE actions, call the tool immediately — do NOT write a reply message. The app will show a confirmation UI to the user.
-- For READ actions (list, summary), just answer directly.
-- Keep replies short and friendly.
-- If user ask for something not related to the expenses as what can you assist for your expenses.`,
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAME.GET_CATEGORY_TOTAL,
+      description:
+        "Get the aggregated total amount and transaction count for a single category. Pass `from` and `to` to scope it to a date range, or omit both for an all-time total. Use this when the user asks how much they spent (or earned) in a specific category — for example 'how much did I spend on food', 'food expenses this month'.",
+      parameters: {
+        type: "object",
+        required: ["category_id"],
+        additionalProperties: false,
+        properties: {
+          category_id: {
+            type: "integer",
+            description:
+              "Numeric category ID from the provided category list.",
+          },
+          from: {
+            type: "string",
+            description:
+              "Optional start of range in ISO 8601 format (inclusive). Provide only if the user mentions a time period.",
+          },
+          to: {
+            type: "string",
+            description:
+              "Optional end of range in ISO 8601 format (inclusive). Provide only if the user mentions a time period.",
+          },
+        },
+      },
     },
-    ...history,
-  ];
-};
+  },
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAME.GET_DATE_RANGE_TOTAL,
+      description:
+        "Get a summary of all expenses and income within a date range — total expense, total income, net, and a per-category breakdown. Use this when the user asks for a summary, overview, or totals over a period (e.g. 'this month', 'last week', 'in May').",
+      parameters: {
+        type: "object",
+        required: ["from", "to"],
+        additionalProperties: false,
+        properties: {
+          from: {
+            type: "string",
+            description: "Start of range in ISO 8601 format (inclusive).",
+          },
+          to: {
+            type: "string",
+            description: "End of range in ISO 8601 format (inclusive).",
+          },
+        },
+      },
+    },
+  },
+];

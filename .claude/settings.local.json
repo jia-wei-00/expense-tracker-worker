@@ -36,7 +36,11 @@
       "Bash(xargs grep -l \"input_audio\")",
       "Bash(Remove-Item *)",
       "PowerShell(New-Item *)",
-      "mcp__supabase__apply_migration"
+      "mcp__supabase__apply_migration",
+      "Bash(npx tsc *)",
+      "Bash(echo \"EXIT: $?\")",
+      "PowerShell(Push-Location worker; npx tsc --noEmit; $code = $LASTEXITCODE; Pop-Location; Write-Output \"EXIT: $code\")",
+      "PowerShell(Set-Location 'C:\\\\vscode\\\\expense-tracker-ai-worker\\\\worker'; npx tsc --noEmit; Write-Output \"EXITCODE=$LASTEXITCODE\")"
     ]
   },
   "enabledMcpjsonServers": [

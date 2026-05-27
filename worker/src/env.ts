@@ -1,0 +1,14 @@
+export interface Env {
+  AI_PROVIDER: string;
+  OPENROUTER_API_KEY: string;
+  GEMINI_API_KEY: string;
+  SUPABASE_URL: string;
+  SUPABASE_ANON_KEY: string;
+  SUPABASE_SERVICE_ROLE_KEY: string;
+  ALLOWED_ORIGIN: string;
+  WHATSAPP_VERIFY_TOKEN: string;
+  WHATSAPP_ACCESS_TOKEN: string;
+  WHATSAPP_PHONE_NUMBER_ID: string;
+  WHATSAPP_APP_SECRET: string;
+  WHATSAPP_TEMPLATE_NAME: string;
+}
