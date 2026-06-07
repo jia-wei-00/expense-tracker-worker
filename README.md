@@ -70,9 +70,9 @@ A full-stack expense tracking application with an AI-powered chat agent. Built w
         │       ├── handler.ts        # Main webhook dispatch (text / audio / image / button)
         │       ├── api.ts            # Meta Cloud API: send messages, download media
         │       ├── webhook.ts        # Signature verification + payload parser
-        │       ├── media.ts          # Media → LangChain ContentBlock[]
+        │       ├── media.ts          # Image → LangChain image block; audio → Gemini-native transcription
         │       ├── verify.ts         # Number-verification button handler
-        │       └── confirm.ts        # Add/delete expense confirmation flow
+        │       └── confirm.ts        # Batch add/delete confirmation flow
         └── types/                    # Zod schemas + inferred types
 ```
 
@@ -120,9 +120,21 @@ Update `worker/wrangler.jsonc` vars:
 }
 ```
 
-Observability (logs + invocation logs are enabled, traces are off) is configured under the top-level `observability` block — leave it as shipped unless you need different sampling.
+Observability (logs + invocation logs + traces) is configured under the top-level `observability` block — adjust sampling rates if your traffic is high.
 
-Set secrets once via Wrangler (only set what you need based on `AI_PROVIDER`):
+**Local development — `worker/.dev.vars`.** Wrangler auto-loads a `KEY=VALUE` file at `worker/.dev.vars` as if each line had been set via `wrangler secret put`. It's already gitignored. Create it with the secrets you need:
+
+```env
+OPENROUTER_API_KEY=...
+GEMINI_API_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+WHATSAPP_VERIFY_TOKEN=...
+WHATSAPP_ACCESS_TOKEN=...
+WHATSAPP_PHONE_NUMBER_ID=...
+WHATSAPP_APP_SECRET=...
+```
+
+**Production — upload each secret once via Wrangler.** `.dev.vars` is local-only; production reads from Cloudflare's encrypted secret store:
 
 ```bash
 # AI provider — set one depending on AI_PROVIDER value
@@ -189,16 +201,23 @@ Every inbound WhatsApp message goes through this pipeline:
 1. **Meta webhook** hits `POST /whatsapp` — the worker verifies the `X-Hub-Signature-256` HMAC header using `WHATSAPP_APP_SECRET`. Invalid signatures return `403`.
 2. **Payload parsing** (`webhook.ts`) classifies the message as `text`, `audio`, `image`, `button_reply`, or `other`.
 3. **Phone-number lookup** finds the linked `whatsapp_users` row. Unlinked or unverified numbers get a polite reply and the flow stops — no AI call is made.
-4. **Content normalization** (`media.ts`):
-   - Text → passed as a plain string.
-   - Audio → downloaded from Meta, base64-encoded, wrapped as a LangChain `{ type: "audio", mimeType, data }` content block.
-   - Image → same as audio with `type: "image"`, plus an optional `{ type: "text", text: caption }` block.
+4. **Content normalization** (`media.ts`) — see [Multimodal handling](#multimodal-handling) below for the per-type details.
 5. **Agent runs** (`services/agent.ts`) — the model can call read tools (executed inline) and may request write tools (`addExpense`, `deleteExpense`). Write tools throw a `PendingActionInterrupt` instead of mutating the DB.
 6. **Reply path:**
    - If the agent produced text, the worker calls Meta's `/messages` endpoint to send it back.
-   - If a write was requested, the worker stores the pending action in `whatsapp_pending_actions` (with a TTL) and sends an **interactive buttons** message — "Confirm" / "Cancel".
-7. **Confirmation tap** comes back as another webhook (`type: "button_reply"`). `confirm.ts` loads the pending row, executes the DB write with the **service-role** Supabase client scoped to the linked user, then deletes the pending row.
-8. The worker always responds `200 OK` to Meta — non-200 triggers retry storms.
+   - If one or more writes were requested, the worker stores **all** of them in a single `whatsapp_pending_actions` row (the `actions` column is a jsonb array) and sends one **interactive buttons** message — "Confirm" / "Cancel" — listing every action.
+7. **Confirmation tap** comes back as another webhook (`type: "button_reply"`). `confirm.ts` loads the pending row, runs every add via a single `.insert([...])` and every delete via a single `.delete().in("id", [...])` (both with the **service-role** client scoped to the linked user), then deletes the pending row.
+8. **Failure-aware replies** — every media fetch, transcription, and agent invocation is wrapped so the user always gets a friendly WhatsApp message on error (`"Sorry, I couldn't read that image..."` / `"...something went wrong..."`). The worker always responds `200 OK` to Meta — non-200 triggers retry storms.
+
+### Multimodal handling
+
+WhatsApp can send three kinds of user content. Each is normalised to a form LangChain + Gemini accepts:
+
+| Input | Path | Why |
+|---|---|---|
+| **Text** | Forwarded as a plain string into `new HumanMessage(text)`. | Native LangChain input shape. |
+| **Image** (JPEG / PNG / WebP) | Downloaded from Meta, base64-encoded, wrapped as a LangChain data content block `{ type: "image", source_type: "base64", mime_type, data }` (plus an optional `{ type: "text", text: caption }` block). LangChain's OpenAI converter emits this as `{ type: "image_url", image_url: { url: "data:...;base64,..." } }` — the canonical multimodal format Gemini accepts. | Gemini "sees" the image directly. |
+| **Voice note** (OGG/Opus) | **Not** sent through the chat model — instead `transcribeAudio()` POSTs the raw OGG to Gemini's *native* `:generateContent` endpoint (`inline_data`), gets a transcript back, then feeds that as a plain text `HumanMessage`. | OpenAI's chat-completions schema (the shim Gemini exposes for `ChatOpenAI`) only accepts `audio/wav` and `audio/mp3` for `input_audio`; WhatsApp sends OGG. Gemini's native API handles OGG fine, so we use it just for transcription and keep the agent loop unchanged. |
 
 ### Number verification flow
 
@@ -274,12 +293,42 @@ Response (analytics mode):
 
 Conversation history is persisted server-side in the `chat_message` table — the client only sends the new message each turn and echoes `sessionId` back to continue the same thread.
 
+**Example — text-only follow-up:**
+
+```jsonc
+POST /chat
+Authorization: Bearer <supabase JWT>
+{
+  "message": "how much did I spend on food this month?",
+  "sessionId": "9c2a..."
+}
+```
+
+**Example — image attachment (e.g. a receipt photo from Supabase Storage):**
+
+```jsonc
+POST /chat
+Authorization: Bearer <supabase JWT>
+{
+  "message": "log this receipt",
+  "attachments": [
+    {
+      "url": "https://<project>.supabase.co/storage/v1/object/public/chat-images/receipt-123.jpg",
+      "contentType": "image/jpeg",
+      "name": "receipt-123.jpg"
+    }
+  ]
+}
+```
+
+The worker turns the second example into a multimodal `HumanMessage` (`[text, image_url]`), the agent reads the image, proposes an `addExpense`, and the response comes back with `pendingToolCalls` for the frontend to confirm — same UX as a text turn.
+
 ## Switching AI Provider
 
 Change `AI_PROVIDER` in `worker/wrangler.jsonc` and redeploy — no code changes needed:
 
-```toml
-AI_PROVIDER = "gemini"   # or "openrouter"
+```jsonc
+{ "vars": { "AI_PROVIDER": "gemini" } }  // or "openrouter"
 ```
 
 ## Deployment
