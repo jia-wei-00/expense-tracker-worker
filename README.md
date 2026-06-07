@@ -107,31 +107,36 @@ NEXT_PUBLIC_WORKER_URL=https://your-worker.workers.dev
 
 ### 3. Configure the worker
 
-Update `worker/wrangler.toml` vars:
+Update `worker/wrangler.jsonc` vars:
 
-```toml
-[vars]
-SUPABASE_URL = "your_supabase_project_url"
-SUPABASE_ANON_KEY = "your_supabase_anon_key"
-ALLOWED_ORIGIN = "https://your-frontend-domain.com"
-AI_PROVIDER = "openrouter"   # "openrouter" | "gemini"
+```jsonc
+{
+  "vars": {
+    "SUPABASE_URL": "your_supabase_project_url",
+    "SUPABASE_ANON_KEY": "your_supabase_anon_key",
+    "ALLOWED_ORIGIN": "https://your-frontend-domain.com",
+    "AI_PROVIDER": "openrouter" // "openrouter" | "gemini"
+  }
+}
 ```
+
+Observability (logs + invocation logs are enabled, traces are off) is configured under the top-level `observability` block — leave it as shipped unless you need different sampling.
 
 Set secrets once via Wrangler (only set what you need based on `AI_PROVIDER`):
 
 ```bash
 # AI provider — set one depending on AI_PROVIDER value
-npx wrangler secret put OPENROUTER_API_KEY --config worker/wrangler.toml
-npx wrangler secret put GEMINI_API_KEY --config worker/wrangler.toml
+npx wrangler secret put OPENROUTER_API_KEY --config worker/wrangler.jsonc
+npx wrangler secret put GEMINI_API_KEY --config worker/wrangler.jsonc
 
 # Supabase
-npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --config worker/wrangler.toml
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --config worker/wrangler.jsonc
 
 # WhatsApp (optional — only needed if using the WhatsApp bot)
-npx wrangler secret put WHATSAPP_VERIFY_TOKEN --config worker/wrangler.toml
-npx wrangler secret put WHATSAPP_ACCESS_TOKEN --config worker/wrangler.toml
-npx wrangler secret put WHATSAPP_PHONE_NUMBER_ID --config worker/wrangler.toml
-npx wrangler secret put WHATSAPP_APP_SECRET --config worker/wrangler.toml
+npx wrangler secret put WHATSAPP_VERIFY_TOKEN --config worker/wrangler.jsonc
+npx wrangler secret put WHATSAPP_ACCESS_TOKEN --config worker/wrangler.jsonc
+npx wrangler secret put WHATSAPP_PHONE_NUMBER_ID --config worker/wrangler.jsonc
+npx wrangler secret put WHATSAPP_APP_SECRET --config worker/wrangler.jsonc
 ```
 
 ### 4. Run the development servers
@@ -241,11 +246,19 @@ Request:
 
 ```ts
 {
-  message: string;          // required, non-empty
-  sessionId?: string;       // optional UUID — omit to start a new conversation
-  analyticsMode?: boolean;  // optional — one-shot analytics reply, no persistence
+  message: string;           // user text — can be empty if `attachments` has at least 1
+  sessionId?: string;        // optional UUID — omit to start a new conversation
+  analyticsMode?: boolean;   // optional — one-shot analytics reply, no persistence
+  attachments?: Array<{
+    url: string;             // publicly fetchable URL (Gemini fetches it server-side)
+    contentType:             // MIME — drives backend routing
+      | "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+    name?: string;           // optional original filename
+  }>;                        // max 4 per turn
 }
 ```
+
+At least one of `message` (non-empty after trim) or `attachments` (length ≥ 1) is required. Attachment URLs must be reachable by Gemini's servers — for Supabase Storage, either use a **public** bucket or sign a short-lived URL on the frontend before sending. Attachments are ignored in `analyticsMode`.
 
 Response (chat mode):
 
@@ -263,7 +276,7 @@ Conversation history is persisted server-side in the `chat_message` table — th
 
 ## Switching AI Provider
 
-Change `AI_PROVIDER` in `worker/wrangler.toml` and redeploy — no code changes needed:
+Change `AI_PROVIDER` in `worker/wrangler.jsonc` and redeploy — no code changes needed:
 
 ```toml
 AI_PROVIDER = "gemini"   # or "openrouter"

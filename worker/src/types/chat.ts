@@ -1,14 +1,34 @@
 import { z } from "zod";
-import type OpenAI from "openai";
 
-// Messages from clients aren't fully validated — they pass through to OpenAI which
-// has its own format. We only validate the top-level envelope.
-export const chatRequestSchema = z.object({
-  messages: z.array(z.any()).default([]),
-  analyticsMode: z.boolean().optional(),
+/** Max number of attachments the worker accepts per turn. */
+export const MAX_ATTACHMENTS_PER_TURN = 4;
+
+/** MIME types the worker knows how to forward to the LLM. */
+export const allowedAttachmentMimeSchema = z.enum([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
+
+export const attachmentSchema = z.object({
+  url: z.string().url(),
+  contentType: allowedAttachmentMimeSchema,
+  name: z.string().max(255).optional(),
 });
 
-export type ChatRequestBody = {
-  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
-  analyticsMode?: boolean;
-};
+export type ChatAttachment = z.infer<typeof attachmentSchema>;
+
+export const chatRequestSchema = z
+  .object({
+    message: z.string().max(8000),
+    sessionId: z.string().uuid().optional(),
+    analyticsMode: z.boolean().optional(),
+    attachments: z.array(attachmentSchema).max(MAX_ATTACHMENTS_PER_TURN).optional(),
+  })
+  .refine((v) => v.message.trim().length > 0 || (v.attachments?.length ?? 0) > 0, {
+    message: "Provide a message, an attachment, or both.",
+    path: ["message"],
+  });
+
+export type ChatRequestBody = z.infer<typeof chatRequestSchema>;

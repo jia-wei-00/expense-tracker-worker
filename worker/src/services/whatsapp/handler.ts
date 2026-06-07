@@ -1,22 +1,36 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import OpenAI from "openai";
-import { DB_TABLE } from "../../constants/db";
-import { VERIFY_PAYLOAD_PREFIX } from "../../constants/whatsapp";
-import type { Env } from "../../env";
-import type { Category } from "../../types/expense";
-import { buildAgentPrompt } from "../../ai/prompts";
-import { formatCategoryList } from "../../lib/parsers";
-import { resolveAIConfig } from "../ai";
-import { createServiceClient } from "../supabase";
-import { runAgentLoop } from "../agent";
-import { sendTextMessage } from "./api";
+import {
+  HumanMessage,
+  SystemMessage,
+  type BaseMessage,
+  type MessageContent,
+} from "@langchain/core/messages";
+import { DB_TABLE } from "@/constants/db";
+import { VERIFY_PAYLOAD_PREFIX } from "@/constants/whatsapp";
+import type { Env } from "@/env";
+import { categoryListSchema } from "@/types/expense";
+import { buildAgentSystemPrompt } from "@/ai/prompts";
+import { formatCategoryList } from "@/lib/parsers";
+import { resolveChatModel } from "@/services/ai";
+import { createServiceClient } from "@/services/supabase";
+import { runAgentLoop } from "@/services/agent";
+import { sendTextMessage } from "@/services/whatsapp/api";
 import {
   handleConfirmationReply,
   savePendingAndAskConfirmation,
-} from "./confirm";
-import { fetchMediaAsContent } from "./media";
-import { handleVerificationReply } from "./verify";
-import { parseIncomingWebhook, verifyMetaSignature } from "./webhook";
+} from "@/services/whatsapp/confirm";
+import {
+  fetchImageAsContent,
+  transcribeAudio,
+} from "@/services/whatsapp/media";
+import { handleVerificationReply } from "@/services/whatsapp/verify";
+import {
+  parseIncomingWebhook,
+  verifyMetaSignature,
+} from "@/services/whatsapp/webhook";
+
+const GENERIC_ERROR_REPLY =
+  "Sorry, something went wrong on my end. Please try again in a moment.";
 
 export async function handleWhatsAppVerification(
   req: Request,
@@ -56,8 +70,6 @@ export async function handleWhatsAppMessage(
     env.SUPABASE_SERVICE_ROLE_KEY,
   );
 
-  // Verification button replies are handled before the linked user lookup
-  // since unverified users still need to be able to verify.
   if (
     parsed.type === "button_reply" &&
     parsed.buttonId?.startsWith(VERIFY_PAYLOAD_PREFIX)
@@ -92,56 +104,103 @@ export async function handleWhatsAppMessage(
 
   const userId: string = linkedUser.user_id;
 
-  if (parsed.type === "button_reply" && parsed.buttonId) {
-    await handleConfirmationReply(
-      parsed.from,
-      parsed.buttonId,
-      userId,
-      supabase,
-      env,
-    );
-  } else if (parsed.type === "text" && parsed.text) {
-    await runWhatsAppAgent(parsed.from, parsed.text, userId, supabase, env);
-  } else if (parsed.type === "audio" && parsed.mediaId) {
-    const content = await fetchMediaAsContent(parsed.mediaId, undefined, env);
-    if (!content) {
-      await sendTextMessage(
+  try {
+    if (parsed.type === "button_reply" && parsed.buttonId) {
+      await handleConfirmationReply(
         parsed.from,
-        "Sorry, I couldn't process that audio. Try sending text instead.",
+        parsed.buttonId,
+        userId,
+        supabase,
         env,
       );
-    } else {
-      await runWhatsAppAgent(parsed.from, content, userId, supabase, env);
-    }
-  } else if (parsed.type === "image" && parsed.mediaId) {
-    const content = await fetchMediaAsContent(
-      parsed.mediaId,
-      parsed.caption,
-      env,
-    );
-    if (!content) {
-      await sendTextMessage(
+    } else if (parsed.type === "text" && parsed.text) {
+      await runWhatsAppAgent(parsed.from, parsed.text, userId, supabase, env);
+    } else if (parsed.type === "audio" && parsed.mediaId) {
+      await handleAudioMessage(parsed.from, parsed.mediaId, userId, supabase, env);
+    } else if (parsed.type === "image" && parsed.mediaId) {
+      await handleImageMessage(
         parsed.from,
-        "Sorry, I couldn't process that image. Try sending text instead.",
+        parsed.mediaId,
+        parsed.caption,
+        userId,
+        supabase,
         env,
       );
-    } else {
-      await runWhatsAppAgent(parsed.from, content, userId, supabase, env);
+    } else if (parsed.type === "other") {
+      await sendTextMessage(
+        parsed.from,
+        "Sorry, I can only handle text, voice, and image messages.",
+        env,
+      );
     }
-  } else if (parsed.type === "other") {
-    await sendTextMessage(
-      parsed.from,
-      "Sorry, I can only handle text, voice, and image messages.",
-      env,
-    );
+  } catch (err) {
+    console.error("WhatsApp handler error", err);
+    await safeSendText(parsed.from, GENERIC_ERROR_REPLY, env);
   }
 
   return new Response("OK", { status: 200 });
 }
 
+async function handleAudioMessage(
+  from: string,
+  mediaId: string,
+  userId: string,
+  supabase: SupabaseClient,
+  env: Env,
+) {
+  let transcript: string | null = null;
+  try {
+    transcript = await transcribeAudio(mediaId, env);
+  } catch (err) {
+    console.error("transcribeAudio threw", err);
+  }
+  if (!transcript) {
+    await sendTextMessage(
+      from,
+      "Sorry, I couldn't understand that voice note. Please try again or type your message.",
+      env,
+    );
+    return;
+  }
+  await runWhatsAppAgent(from, transcript, userId, supabase, env);
+}
+
+async function handleImageMessage(
+  from: string,
+  mediaId: string,
+  caption: string | undefined,
+  userId: string,
+  supabase: SupabaseClient,
+  env: Env,
+) {
+  let content: MessageContent | null = null;
+  try {
+    content = await fetchImageAsContent(mediaId, caption, env);
+  } catch (err) {
+    console.error("fetchImageAsContent threw", err);
+  }
+  if (!content) {
+    await sendTextMessage(
+      from,
+      "Sorry, I couldn't read that image. Please try again or type the details instead.",
+      env,
+    );
+    return;
+  }
+  await runWhatsAppAgent(from, content, userId, supabase, env);
+}
+
+async function safeSendText(to: string, text: string, env: Env) {
+  try {
+    await sendTextMessage(to, text, env);
+  } catch (err) {
+    console.error("Failed to send error reply to WhatsApp", err);
+  }
+}
+
 async function runWhatsAppAgent(
   from: string,
-  userContent: string | OpenAI.Chat.ChatCompletionContentPart[],
+  userContent: MessageContent,
   userId: string,
   supabase: SupabaseClient,
   env: Env,
@@ -150,34 +209,28 @@ async function runWhatsAppAgent(
     supabase
       .from(DB_TABLE.EXPENSE_CATEGORY)
       .select("id, name, is_expense")
-      // .eq("user_id", userId)
       .order("name"),
     supabase.auth.admin.getUserById(userId),
   ]);
 
   const email = userData?.user?.email ?? "";
-  const categoryText = formatCategoryList((categories ?? []) as Category[]);
+  const categoryText = formatCategoryList(
+    categoryListSchema.parse(categories ?? []),
+  );
 
-  const { client: openai, model } = resolveAIConfig(env);
-  const messages = buildAgentPrompt({
-    email,
-    categoryText,
-    history: [{ role: "user", content: userContent }],
-  });
+  const llm = resolveChatModel(env);
+  const messages: BaseMessage[] = [
+    new SystemMessage(buildAgentSystemPrompt(email, categoryText)),
+    new HumanMessage({ content: userContent }),
+  ];
 
   try {
-    const result = await runAgentLoop({
-      openai,
-      model,
-      messages,
-      supabase,
-      userId,
-    });
+    const result = await runAgentLoop({ llm, messages, supabase, userId });
 
     if (result.pendingActions.length > 0) {
       await savePendingAndAskConfirmation(
         from,
-        result.pendingActions[0],
+        result.pendingActions,
         supabase,
         env,
       );
@@ -186,14 +239,11 @@ async function runWhatsAppAgent(
 
     if (result.text) await sendTextMessage(from, result.text, env);
   } catch (err) {
-    if (err instanceof OpenAI.RateLimitError) {
-      await sendTextMessage(
-        from,
-        "Sorry, the AI is currently rate limited. Please try again in a moment.",
-        env,
-      );
-      return;
-    }
-    throw err;
+    console.error("runWhatsAppAgent error", err);
+    const reply =
+      err instanceof Error && /rate.?limit/i.test(err.message)
+        ? "Sorry, the AI is currently rate limited. Please try again in a moment."
+        : GENERIC_ERROR_REPLY;
+    await safeSendText(from, reply, env);
   }
 }

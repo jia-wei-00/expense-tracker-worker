@@ -16,8 +16,3 @@ export const TOOL_NAME = {
   GET_CATEGORY_TOTAL: "getCategoryTotal",
   GET_DATE_RANGE_TOTAL: "getDateRangeTotal",
 } as const;
-
-export const WRITE_TOOLS = [
-  TOOL_NAME.ADD_EXPENSE,
-  TOOL_NAME.DELETE_EXPENSE,
-] as const;

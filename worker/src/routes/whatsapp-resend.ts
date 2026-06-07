@@ -1,9 +1,9 @@
-import type { Env } from "../env";
-import { DB_TABLE } from "../constants/db";
-import { jsonResponse } from "../lib/http";
-import { authenticateRequest } from "../services/auth";
-import { createServiceClient } from "../services/supabase";
-import { sendTemplateVerification } from "../services/whatsapp/api";
+import type { Env } from "@/env";
+import { DB_TABLE } from "@/constants/db";
+import { jsonResponse } from "@/lib/http";
+import { authenticateRequest } from "@/services/auth";
+import { createServiceClient } from "@/services/supabase";
+import { sendTemplateVerification } from "@/services/whatsapp/api";
 
 export async function handleWhatsAppResend(
   req: Request,

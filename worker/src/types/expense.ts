@@ -1,11 +1,15 @@
 import { z } from "zod";
-import { TOOL_NAME } from "../constants/ai";
+import { TOOL_NAME } from "@/constants/ai";
 
-export interface Category {
-  id: number;
-  name: string;
-  is_expense: boolean;
-}
+export const categorySchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  is_expense: z.boolean(),
+});
+
+export type Category = z.infer<typeof categorySchema>;
+
+export const categoryListSchema = z.array(categorySchema);
 
 export const addExpenseArgsSchema = z.object({
   name: z.string().default(""),
@@ -24,6 +28,17 @@ export const deleteExpenseArgsSchema = z.object({
 
 export type DeleteExpenseArgs = z.infer<typeof deleteExpenseArgsSchema>;
 
-export type PendingAction =
-  | { toolName: typeof TOOL_NAME.ADD_EXPENSE; args: AddExpenseArgs }
-  | { toolName: typeof TOOL_NAME.DELETE_EXPENSE; args: DeleteExpenseArgs };
+export const pendingActionSchema = z.discriminatedUnion("toolName", [
+  z.object({
+    toolName: z.literal(TOOL_NAME.ADD_EXPENSE),
+    args: addExpenseArgsSchema,
+  }),
+  z.object({
+    toolName: z.literal(TOOL_NAME.DELETE_EXPENSE),
+    args: deleteExpenseArgsSchema,
+  }),
+]);
+
+export type PendingAction = z.infer<typeof pendingActionSchema>;
+
+export const pendingActionListSchema = z.array(pendingActionSchema);

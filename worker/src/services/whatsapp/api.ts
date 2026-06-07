@@ -1,5 +1,5 @@
-import { META_API_BASE } from "../../constants/whatsapp";
-import type { WhatsAppButton } from "../../types/whatsapp";
+import { META_API_BASE } from "@/constants/whatsapp";
+import type { WhatsAppButton } from "@/types/whatsapp";
 
 export interface WhatsAppEnv {
   WHATSAPP_ACCESS_TOKEN: string;

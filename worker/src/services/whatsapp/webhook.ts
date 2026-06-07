@@ -1,7 +1,7 @@
 import type {
   MetaWebhookPayload,
   ParsedWebhookMessage,
-} from "../../types/whatsapp";
+} from "@/types/whatsapp";
 
 export async function verifyMetaSignature(
   rawBody: ArrayBuffer,

@@ -1,19 +1,20 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { TOOL_NAME } from "../../constants/ai";
-import { BUTTON_PREFIX } from "../../constants/whatsapp";
-import { DB_TABLE } from "../../constants/db";
-import { PENDING_ACTION_TTL_MS } from "../../constants/app";
-import type { Env } from "../../env";
-import type { PendingAction } from "../../types/expense";
+import { TOOL_NAME } from "@/constants/ai";
+import { BUTTON_PREFIX } from "@/constants/whatsapp";
+import { DB_TABLE } from "@/constants/db";
+import { PENDING_ACTION_TTL_MS } from "@/constants/app";
+import type { Env } from "@/env";
 import {
-  parseAddExpenseArgs,
-  parseDeleteExpenseArgs,
-} from "../../lib/parsers";
-import { sendInteractiveButtons, sendTextMessage } from "./api";
+  pendingActionListSchema,
+  type AddExpenseArgs,
+  type PendingAction,
+} from "@/types/expense";
+import { sendInteractiveButtons, sendTextMessage } from "@/services/whatsapp/api";
 
 /**
- * Handle confirm/cancel button taps for expense add/delete actions.
- * Reads the pending action from the DB, executes it, then deletes the record.
+ * Handle the Confirm/Cancel button reply for a batch of pending actions.
+ * On confirm, runs all adds in a single insert and all deletes in a single
+ * `in("id", ids)` call, then deletes the pending row.
  */
 export async function handleConfirmationReply(
   from: string,
@@ -27,7 +28,7 @@ export async function handleConfirmationReply(
   if (!isConfirm && !isCancel) return;
 
   const pendingId = buttonId.slice(
-    isConfirm ? BUTTON_PREFIX.CONFIRM.length : BUTTON_PREFIX.CANCEL.length,
+    (isConfirm ? BUTTON_PREFIX.CONFIRM : BUTTON_PREFIX.CANCEL).length,
   );
 
   if (isCancel) {
@@ -35,21 +36,17 @@ export async function handleConfirmationReply(
       .from(DB_TABLE.WHATSAPP_PENDING_ACTIONS)
       .delete()
       .eq("id", pendingId);
-    await sendTextMessage(
-      from,
-      "Cancelled. Anything else I can help with?",
-      env,
-    );
+    await sendTextMessage(from, "Cancelled. Anything else I can help with?", env);
     return;
   }
 
   const { data: pending } = await supabase
     .from(DB_TABLE.WHATSAPP_PENDING_ACTIONS)
-    .select("*")
+    .select("actions")
     .eq("id", pendingId)
     .eq("phone_number", from)
     .gt("expires_at", new Date().toISOString())
-    .single();
+    .maybeSingle();
 
   if (!pending) {
     await sendTextMessage(from, "This action has expired. Please try again.", env);
@@ -61,39 +58,21 @@ export async function handleConfirmationReply(
     .delete()
     .eq("id", pendingId);
 
-  if (pending.tool_name === TOOL_NAME.ADD_EXPENSE) {
-    const args = parseAddExpenseArgs(pending.args);
-    const { error } = await supabase
-      .from(DB_TABLE.EXPENSE)
-      .insert({ ...args, user_id: userId });
-    await sendTextMessage(
-      from,
-      error
-        ? "Failed to save. Please try again."
-        : `Done! ${args.name} RM${args.amount} saved.`,
-      env,
-    );
-  } else if (pending.tool_name === TOOL_NAME.DELETE_EXPENSE) {
-    const { id } = parseDeleteExpenseArgs(pending.args);
-    const { error } = await supabase
-      .from(DB_TABLE.EXPENSE)
-      .delete()
-      .eq("id", id)
-      .eq("user_id", userId);
-    await sendTextMessage(
-      from,
-      error ? "Failed to delete. Please try again." : "Done! Expense deleted.",
-      env,
-    );
+  const parsed = pendingActionListSchema.safeParse(pending.actions);
+  if (!parsed.success || parsed.data.length === 0) {
+    await sendTextMessage(from, "Sorry, this action was malformed.", env);
+    return;
   }
+
+  await sendTextMessage(from, await executeBatch(parsed.data, userId, supabase), env);
 }
 
 /**
- * Save a pending action and send the user a confirmation message with buttons.
+ * Save a batch of pending actions and ask the user to confirm them all.
  */
 export async function savePendingAndAskConfirmation(
   from: string,
-  action: PendingAction,
+  actions: PendingAction[],
   supabase: SupabaseClient,
   env: Env,
 ) {
@@ -101,29 +80,82 @@ export async function savePendingAndAskConfirmation(
 
   const { data: inserted } = await supabase
     .from(DB_TABLE.WHATSAPP_PENDING_ACTIONS)
-    .insert({
-      phone_number: from,
-      tool_name: action.toolName,
-      args: action.args,
-      expires_at: expiresAt,
-    })
+    .insert({ phone_number: from, actions, expires_at: expiresAt })
     .select("id")
     .single();
 
   const pendingId: string = inserted?.id ?? "";
 
-  const confirmText =
-    action.toolName === TOOL_NAME.ADD_EXPENSE
-      ? `Add "${action.args.name}" RM${action.args.amount}?`
-      : `Delete "${action.args.name ?? `expense #${action.args.id}`}"?`;
-
   await sendInteractiveButtons(
     from,
-    confirmText,
+    buildConfirmationText(actions),
     [
       { id: `${BUTTON_PREFIX.CONFIRM}${pendingId}`, title: "Confirm" },
       { id: `${BUTTON_PREFIX.CANCEL}${pendingId}`, title: "Cancel" },
     ],
     env,
   );
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async function executeBatch(
+  actions: PendingAction[],
+  userId: string,
+  supabase: SupabaseClient,
+): Promise<string> {
+  const adds: AddExpenseArgs[] = [];
+  const deleteIds: number[] = [];
+  for (const action of actions) {
+    if (action.toolName === TOOL_NAME.ADD_EXPENSE) adds.push(action.args);
+    else deleteIds.push(action.args.id);
+  }
+
+  const [addError, deleteError] = await Promise.all([
+    adds.length > 0
+      ? supabase
+          .from(DB_TABLE.EXPENSE)
+          .insert(adds.map((a) => ({ ...a, user_id: userId })))
+          .then((r) => r.error)
+      : Promise.resolve(null),
+    deleteIds.length > 0
+      ? supabase
+          .from(DB_TABLE.EXPENSE)
+          .delete()
+          .in("id", deleteIds)
+          .eq("user_id", userId)
+          .then((r) => r.error)
+      : Promise.resolve(null),
+  ]);
+
+  const parts: string[] = [];
+  if (adds.length > 0) {
+    parts.push(addError ? `failed to add ${adds.length}` : `added ${adds.length}`);
+  }
+  if (deleteIds.length > 0) {
+    parts.push(
+      deleteError ? `failed to delete ${deleteIds.length}` : `deleted ${deleteIds.length}`,
+    );
+  }
+
+  const summary = parts.join(", ");
+  return addError || deleteError ? `Partial success: ${summary}.` : `Done! ${summary}.`;
+}
+
+function buildConfirmationText(actions: PendingAction[]): string {
+  if (actions.length === 1) {
+    const a = actions[0];
+    return a.toolName === TOOL_NAME.ADD_EXPENSE
+      ? `Add "${a.args.name}" RM${a.args.amount}?`
+      : `Delete "${a.args.name ?? `expense #${a.args.id}`}"?`;
+  }
+
+  const lines = actions.map((a, i) => {
+    const n = i + 1;
+    return a.toolName === TOOL_NAME.ADD_EXPENSE
+      ? `${n}. Add ${a.args.name} — RM${a.args.amount}`
+      : `${n}. Delete ${a.args.name ?? `expense #${a.args.id}`}`;
+  });
+
+  return `Confirm ${actions.length} actions?\n${lines.join("\n")}`;
 }

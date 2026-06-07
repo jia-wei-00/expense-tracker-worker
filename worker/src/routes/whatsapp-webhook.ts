@@ -1,9 +1,9 @@
-import type { Env } from "../env";
-import { jsonResponse } from "../lib/http";
+import type { Env } from "@/env";
+import { jsonResponse } from "@/lib/http";
 import {
   handleWhatsAppMessage,
   handleWhatsAppVerification,
-} from "../services/whatsapp/handler";
+} from "@/services/whatsapp/handler";
 
 export async function handleWhatsAppWebhook(
   req: Request,

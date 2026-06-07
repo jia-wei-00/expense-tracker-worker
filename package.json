@@ -7,9 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "worker": "npx wrangler dev --tunnel --config worker/wrangler.toml",
+    "worker": "npx wrangler dev --tunnel --config worker/wrangler.jsonc",
     "types": "npx supabase gen types typescript --project-id ydpvxgjfcftaipcpirph > src/types/database.types.ts",
-    "deploy:worker": "npx wrangler deploy --config worker/wrangler.toml",
+    "deploy:worker": "npx wrangler deploy --config worker/wrangler.jsonc",
     "update:types": " npx supabase gen types typescript --project-id ydpvxgjfcftaipcpirph --schema public > src/types/database.types.ts"
   },
   "dependencies": {

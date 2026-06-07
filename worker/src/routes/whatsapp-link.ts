@@ -1,10 +1,10 @@
-import type { Env } from "../env";
-import { DB_TABLE } from "../constants/db";
-import { jsonResponse } from "../lib/http";
-import { authenticateRequest } from "../services/auth";
-import { createServiceClient } from "../services/supabase";
-import { sendTemplateVerification } from "../services/whatsapp/api";
-import { linkPhoneRequestSchema } from "../types/whatsapp";
+import type { Env } from "@/env";
+import { DB_TABLE } from "@/constants/db";
+import { jsonResponse } from "@/lib/http";
+import { authenticateRequest } from "@/services/auth";
+import { createServiceClient } from "@/services/supabase";
+import { sendTemplateVerification } from "@/services/whatsapp/api";
+import { linkPhoneRequestSchema } from "@/types/whatsapp";
 
 export async function handleWhatsAppLink(
   req: Request,

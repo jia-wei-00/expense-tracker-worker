@@ -15,9 +15,9 @@ npm run lint      # ESLint
 npm run worker    # Cloudflare Worker dev with tunnel (wrangler dev --tunnel)
 ```
 
-To deploy the worker: `npx wrangler deploy --config worker/wrangler.toml`
+To deploy the worker: `npx wrangler deploy --config worker/wrangler.jsonc`
 
-Worker secrets: `wrangler secret put OPENROUTER_API_KEY --config worker/wrangler.toml`
+Worker secrets: `wrangler secret put OPENROUTER_API_KEY --config worker/wrangler.jsonc`
 
 ## Architecture
 
@@ -70,4 +70,4 @@ Components are shadcn/ui (Radix UI primitives) with Tailwind CSS v4. Add new sha
 
 ### Worker environment
 
-The worker (`worker/wrangler.toml`) reads `SUPABASE_URL` and `SUPABASE_ANON_KEY` as `[vars]` and `OPENROUTER_API_KEY` as a secret. `ALLOWED_ORIGIN` controls CORS. The frontend connects to the worker via `NEXT_PUBLIC_WORKER_URL`.
+The worker (`worker/wrangler.jsonc`) reads `SUPABASE_URL` and `SUPABASE_ANON_KEY` from the `vars` block; sensitive values (`OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, all WhatsApp tokens) should be set with `wrangler secret put`. `ALLOWED_ORIGIN` controls CORS. Observability (logs + invocation logs on, traces off) is configured at the top of `wrangler.jsonc`. The frontend connects to the worker via `NEXT_PUBLIC_WORKER_URL`.

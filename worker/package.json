@@ -8,6 +8,8 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
+    "@langchain/core": "^1.1.48",
+    "@langchain/openai": "^1.4.7",
     "@supabase/supabase-js": "^2.105.4",
     "openai": "^4.104.0",
     "zod": "^3.25.0"

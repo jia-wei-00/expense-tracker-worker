@@ -1,6 +1,6 @@
 import type { User } from "@supabase/supabase-js";
-import { createSupabaseClient } from "./supabase";
-import type { Env } from "../env";
+import { createSupabaseClient } from "@/services/supabase";
+import type { Env } from "@/env";
 
 export type AuthResult =
   | { ok: true; user: User; accessToken: string }

@@ -1,11 +1,11 @@
-import type { Env } from "./env";
-import { corsHeaders, jsonResponse } from "./lib/http";
-import { handleChat } from "./routes/chat";
-import { handleWhatsAppLink } from "./routes/whatsapp-link";
-import { handleWhatsAppResend } from "./routes/whatsapp-resend";
-import { handleWhatsAppWebhook } from "./routes/whatsapp-webhook";
+import type { Env } from "@/env";
+import { corsHeaders, jsonResponse } from "@/lib/http";
+import { handleChat } from "@/routes/chat";
+import { handleWhatsAppLink } from "@/routes/whatsapp-link";
+import { handleWhatsAppResend } from "@/routes/whatsapp-resend";
+import { handleWhatsAppWebhook } from "@/routes/whatsapp-webhook";
 
-export type { Env } from "./env";
+export type { Env } from "@/env";
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {

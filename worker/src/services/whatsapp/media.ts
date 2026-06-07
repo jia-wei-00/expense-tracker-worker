@@ -1,49 +1,84 @@
-import OpenAI from "openai";
-import { arrayBufferToBase64 } from "../../lib/base64";
-import { downloadMetaMedia } from "./api";
-import type { Env } from "../../env";
+import type { ContentBlock } from "@langchain/core/messages";
+import { GEMINI_MODEL } from "@/constants/ai";
+import { arrayBufferToBase64 } from "@/lib/base64";
+import { downloadMetaMedia } from "@/services/whatsapp/api";
+import type { Env } from "@/env";
+
+const GEMINI_NATIVE_BASE_URL =
+  "https://generativelanguage.googleapis.com/v1beta/models";
+
+const TRANSCRIPTION_PROMPT =
+  "Transcribe the user's voice note exactly as spoken. Output ONLY the transcription text — no commentary, no quotes, no prefix.";
 
 /**
- * Download a media file from Meta and convert it to OpenAI content parts.
- * Returns null if the media type isn't supported.
+ * Download an image from Meta and return LangChain v1 data content blocks
+ * (`source_type: "base64"`) that LangChain's OpenAI converter will turn into a
+ * standard `image_url` data URL part. Returns null if the media isn't an image.
  */
-export async function fetchMediaAsContent(
+export async function fetchImageAsContent(
   mediaId: string,
   caption: string | undefined,
   env: Env,
-): Promise<OpenAI.Chat.ChatCompletionContentPart[] | null> {
+): Promise<ContentBlock[] | null> {
   const { data, mimeType } = await downloadMetaMedia(mediaId, env);
+  if (!mimeType.startsWith("image/")) return null;
+
   const base64 = arrayBufferToBase64(data);
-  const parts = buildMediaContent(mimeType, base64, caption);
-  return parts.length ? parts : null;
+  const blocks: ContentBlock[] = [
+    {
+      type: "image",
+      source_type: "base64",
+      mime_type: mimeType,
+      data: base64,
+    },
+  ];
+  if (caption) blocks.push({ type: "text", text: caption });
+  return blocks;
 }
 
-function buildMediaContent(
-  mimeType: string,
-  base64: string,
-  caption?: string,
-): OpenAI.Chat.ChatCompletionContentPart[] {
-  const parts: OpenAI.Chat.ChatCompletionContentPart[] = [];
+/**
+ * Transcribe a WhatsApp voice note via Gemini's native `:generateContent`
+ * endpoint, which accepts OGG/Opus directly (unlike the OpenAI-compat shim,
+ * which only allows wav/mp3). Returns the trimmed transcript, or null on
+ * failure / empty result.
+ */
+export async function transcribeAudio(
+  mediaId: string,
+  env: Env,
+): Promise<string | null> {
+  const { data, mimeType } = await downloadMetaMedia(mediaId, env);
+  if (!mimeType.startsWith("audio/")) return null;
 
-  if (mimeType.startsWith("image/")) {
-    parts.push({
-      type: "image_url",
-      image_url: { url: `data:${mimeType};base64,${base64}` },
-    });
-    if (caption) parts.push({ type: "text", text: caption });
-  } else if (mimeType.startsWith("audio/")) {
-    parts.push({
-      type: "input_audio",
-      input_audio: { data: base64, format: resolveAudioFormat(mimeType) },
-    });
+  const base64 = arrayBufferToBase64(data);
+  const url = `${GEMINI_NATIVE_BASE_URL}/${GEMINI_MODEL}:generateContent?key=${env.GEMINI_API_KEY}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: TRANSCRIPTION_PROMPT },
+            { inline_data: { mime_type: mimeType, data: base64 } },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!res.ok) {
+    console.error("Audio transcription failed", res.status, await res.text());
+    return null;
   }
 
-  return parts;
-}
+  const json = (await res.json()) as {
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> };
+    }>;
+  };
 
-// SDK currently only accepts "wav" | "mp3" — map everything to the closest supported format.
-// OpenRouter/the model may accept more at runtime; update this if the SDK type widens.
-function resolveAudioFormat(mimeType: string): "wav" | "mp3" {
-  if (mimeType.startsWith("audio/wav")) return "wav";
-  return "mp3";
+  const text = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  return text && text.length > 0 ? text : null;
 }

@@ -1,232 +1,141 @@
-import type OpenAI from "openai";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { DEFAULT_EXPENSE_LIMIT, MAX_LLM_STEPS } from "../constants/app";
-import { TOOL_NAME } from "../constants/ai";
-import { DB_TABLE } from "../constants/db";
-import { PENDING_CONFIRMATION_REPLY } from "../constants/app";
-import { tools } from "../ai/tools";
 import {
-  isWriteToolName,
-  normalizeAddExpenseArgs,
-} from "../lib/parsers";
-import type { PendingAction } from "../types/expense";
+  ToolMessage,
+  type AIMessageChunk,
+  type BaseMessage,
+} from "@langchain/core/messages";
+import type { ChatOpenAI } from "@langchain/openai";
+import { MAX_LLM_STEPS, PENDING_CONFIRMATION_REPLY } from "@/constants/app";
+import { createExpenseTools, PendingActionInterrupt } from "@/ai/tools";
+import type { PendingAction } from "@/types/expense";
 
 export interface AgentLoopResult {
   text: string | null;
   pendingActions: PendingAction[];
-  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
+  /** Messages produced during this run (AI + tool messages). Excludes input history. */
+  newMessages: BaseMessage[];
 }
 
-type JoinedCategory = { name: string; is_expense: boolean } | null;
-
-function readJoinedCategory(value: unknown): JoinedCategory {
-  if (Array.isArray(value)) {
-    return (value[0] as JoinedCategory) ?? null;
-  }
-  return (value as JoinedCategory) ?? null;
+interface RunAgentLoopParams {
+  llm: ChatOpenAI;
+  messages: BaseMessage[];
+  supabase: SupabaseClient;
+  userId?: string;
+  enableTools?: boolean;
 }
 
 /**
- * Runs the LLM agent loop. Returns when:
- * - The model produces a non-tool text response (text returned)
- * - The model requests a write tool (pendingActions returned for confirmation)
- * - MAX_LLM_STEPS is reached
- *
- * `supabase` is used for read tools. It can be a user-scoped client (with JWT)
- * or a service client — caller decides. Write operations are NOT executed here;
- * they're returned as pending actions for the caller/frontend to confirm.
+ * Runs the agent loop. Returns when:
+ * - The model produces a non-tool text response (text returned).
+ * - A write tool requests confirmation (pendingActions returned).
+ * - MAX_LLM_STEPS is reached.
  */
 export async function runAgentLoop({
-  openai,
-  model,
+  llm,
   messages,
   supabase,
   userId,
   enableTools = true,
-}: {
-  openai: OpenAI;
-  model: string;
-  messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[];
-  supabase: SupabaseClient;
-  userId?: string;
-  enableTools?: boolean;
-}): Promise<AgentLoopResult> {
+}: RunAgentLoopParams): Promise<AgentLoopResult> {
+  const tools = createExpenseTools(supabase, userId);
+  const toolsByName = new Map(tools.map((t) => [t.name, t]));
+  const llmWithTools = enableTools ? llm.bindTools(tools) : llm;
+
+  const working: BaseMessage[] = [...messages];
+  const newMessages: BaseMessage[] = [];
+  const pendingActions: PendingAction[] = [];
+
   for (let step = 0; step < MAX_LLM_STEPS; step++) {
-    const response = await openai.chat.completions.create({
-      model,
-      messages,
-      tools: enableTools ? tools : undefined,
-    });
+    const aiMessage: AIMessageChunk = await llmWithTools.invoke(working);
+    working.push(aiMessage);
+    newMessages.push(aiMessage);
 
-    const msg = response.choices[0].message;
-    messages.push(msg);
-
-    if (!msg.tool_calls?.length) {
+    const toolCalls = aiMessage.tool_calls ?? [];
+    if (toolCalls.length === 0) {
       return {
-        text: typeof msg.content === "string" ? msg.content : null,
-        pendingActions: [],
-        messages,
+        text: extractText(aiMessage),
+        pendingActions,
+        newMessages,
       };
     }
 
-    const pendingActions: PendingAction[] = [];
-    const toolResults: OpenAI.Chat.Completions.ChatCompletionToolMessageParam[] =
-      [];
+    // LangChain's OpenAI converter strips provider-specific fields like
+    // Gemini's `extra_content.google.thought_signature` when serializing
+    // `message.tool_calls`. Clearing the logical array forces it to fall
+    // back to `additional_kwargs.tool_calls` (the raw response), which
+    // preserves thought_signature — required by Gemini 3.x on subsequent
+    // turns.
+    aiMessage.tool_calls = [];
 
-    const pushResult = (
-      toolCallId: string,
-      payload: unknown,
-    ) =>
-      toolResults.push({
-        role: "tool",
-        tool_call_id: toolCallId,
-        content: JSON.stringify(payload),
-      });
+    for (const tc of toolCalls) {
+      const toolCallId = tc.id ?? "";
+      const tool = toolsByName.get(tc.name);
+      if (!tool) {
+        pushToolMessage(
+          working,
+          newMessages,
+          JSON.stringify({ error: `Unknown tool: ${tc.name}` }),
+          toolCallId,
+          tc.name,
+        );
+        continue;
+      }
 
-    for (const tc of msg.tool_calls) {
-      const args = JSON.parse(tc.function.arguments ?? "{}") as Record<
-        string,
-        unknown
-      >;
-
-      if (isWriteToolName(tc.function.name)) {
-        if (tc.function.name === TOOL_NAME.ADD_EXPENSE) {
-          pendingActions.push({
-            toolName: tc.function.name,
-            args: normalizeAddExpenseArgs(args),
-          });
-          toolResults.push({
-            role: "tool",
-            tool_call_id: tc.id,
-            content: PENDING_CONFIRMATION_REPLY,
-          });
+      try {
+        const result = await tool.invoke(tc.args);
+        pushToolMessage(working, newMessages, stringify(result), toolCallId, tc.name);
+      } catch (err) {
+        if (err instanceof PendingActionInterrupt) {
+          pendingActions.push(err.action);
+          pushToolMessage(
+            working,
+            newMessages,
+            PENDING_CONFIRMATION_REPLY,
+            toolCallId,
+            tc.name,
+          );
         } else {
-          const id = Number(args.id);
-          let lookupQuery = supabase
-            .from(DB_TABLE.EXPENSE)
-            .select("id, name")
-            .eq("id", id);
-          if (userId) lookupQuery = lookupQuery.eq("user_id", userId);
-          const { data: expense } = await lookupQuery.maybeSingle();
-
-          if (!expense) {
-            pushResult(tc.id, { error: `Expense with ID ${id} not found` });
-          } else {
-            pendingActions.push({
-              toolName: tc.function.name,
-              args: { id: expense.id as number, name: expense.name as string },
-            });
-            toolResults.push({
-              role: "tool",
-              tool_call_id: tc.id,
-              content: PENDING_CONFIRMATION_REPLY,
-            });
-          }
+          throw err;
         }
-        continue;
       }
-
-      if (tc.function.name === TOOL_NAME.LIST_EXPENSES) {
-        let query = supabase
-          .from(DB_TABLE.EXPENSE)
-          .select(
-            "id, name, amount, spend_date, is_expense, expense_category(name)",
-          )
-          .order("spend_date", { ascending: false })
-          .limit(Number(args.limit ?? DEFAULT_EXPENSE_LIMIT));
-
-        if (userId) query = query.eq("user_id", userId);
-        if (args.category) query = query.eq("category", Number(args.category));
-        if (args.from) query = query.gte("spend_date", String(args.from));
-        if (args.to) query = query.lte("spend_date", String(args.to));
-
-        const { data, error } = await query;
-        pushResult(tc.id, error ? { error: error.message } : data);
-        continue;
-      }
-
-      if (tc.function.name === TOOL_NAME.GET_CATEGORY_TOTAL) {
-        const categoryId = Number(args.category_id);
-        let query = supabase
-          .from(DB_TABLE.EXPENSE)
-          .select("amount, expense_category(name, is_expense)")
-          .eq("category", categoryId);
-        if (userId) query = query.eq("user_id", userId);
-        if (args.from) query = query.gte("spend_date", String(args.from));
-        if (args.to) query = query.lte("spend_date", String(args.to));
-
-        const { data, error } = await query;
-        if (error) {
-          pushResult(tc.id, { error: error.message });
-          continue;
-        }
-        const rows = (data ?? []) as Array<{
-          amount: number;
-          expense_category: unknown;
-        }>;
-        const total = rows.reduce((sum, r) => sum + Number(r.amount), 0);
-        const category = readJoinedCategory(rows[0]?.expense_category);
-        pushResult(tc.id, {
-          category_id: categoryId,
-          category_name: category?.name ?? null,
-          is_expense: category?.is_expense ?? null,
-          from: args.from ?? null,
-          to: args.to ?? null,
-          total,
-          count: rows.length,
-        });
-        continue;
-      }
-
-      if (tc.function.name === TOOL_NAME.GET_DATE_RANGE_TOTAL) {
-        let query = supabase
-          .from(DB_TABLE.EXPENSE)
-          .select("amount, is_expense, expense_category(name)")
-          .gte("spend_date", String(args.from))
-          .lte("spend_date", String(args.to));
-        if (userId) query = query.eq("user_id", userId);
-
-        const { data, error } = await query;
-        if (error) {
-          pushResult(tc.id, { error: error.message });
-          continue;
-        }
-        const rows = (data ?? []) as Array<{
-          amount: number;
-          is_expense: boolean;
-          expense_category: unknown;
-        }>;
-        let totalExpense = 0;
-        let totalIncome = 0;
-        const byCategory: Record<string, number> = {};
-        for (const r of rows) {
-          const amount = Number(r.amount);
-          if (r.is_expense) totalExpense += amount;
-          else totalIncome += amount;
-          const cat = readJoinedCategory(r.expense_category);
-          const name = cat?.name ?? "Uncategorized";
-          byCategory[name] = (byCategory[name] ?? 0) + amount;
-        }
-        pushResult(tc.id, {
-          from: args.from,
-          to: args.to,
-          total_expense: totalExpense,
-          total_income: totalIncome,
-          net: totalIncome - totalExpense,
-          count: rows.length,
-          by_category: byCategory,
-        });
-        continue;
-      }
-
     }
 
     if (pendingActions.length > 0) {
-      return { text: null, pendingActions, messages };
+      return { text: null, pendingActions, newMessages };
     }
-
-    messages.push(...toolResults);
   }
 
-  return { text: null, pendingActions: [], messages };
+  return { text: null, pendingActions, newMessages };
+}
+
+function pushToolMessage(
+  working: BaseMessage[],
+  collected: BaseMessage[],
+  content: string,
+  toolCallId: string,
+  name: string,
+) {
+  const msg = new ToolMessage({ content, tool_call_id: toolCallId, name });
+  working.push(msg);
+  collected.push(msg);
+}
+
+function extractText(message: AIMessageChunk): string | null {
+  const { content } = message;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return null;
+  const parts = content.flatMap((block) => {
+    if (typeof block === "string") return [block];
+    if (block && typeof block === "object" && "text" in block) {
+      const text = (block as { text?: unknown }).text;
+      return typeof text === "string" ? [text] : [];
+    }
+    return [];
+  });
+  return parts.length > 0 ? parts.join("") : null;
+}
+
+function stringify(value: unknown): string {
+  if (typeof value === "string") return value;
+  return JSON.stringify(value);
 }

@@ -40,7 +40,15 @@
       "Bash(npx tsc *)",
       "Bash(echo \"EXIT: $?\")",
       "PowerShell(Push-Location worker; npx tsc --noEmit; $code = $LASTEXITCODE; Pop-Location; Write-Output \"EXIT: $code\")",
-      "PowerShell(Set-Location 'C:\\\\vscode\\\\expense-tracker-ai-worker\\\\worker'; npx tsc --noEmit; Write-Output \"EXITCODE=$LASTEXITCODE\")"
+      "PowerShell(Set-Location 'C:\\\\vscode\\\\expense-tracker-ai-worker\\\\worker'; npx tsc --noEmit; Write-Output \"EXITCODE=$LASTEXITCODE\")",
+      "PowerShell(Set-Location 'C:\\\\vscode\\\\expense-tracker-ai-worker\\\\worker'; npx tsc --noEmit 2>&1; Write-Output \"EXITCODE=$LASTEXITCODE\")",
+      "mcp__docs-langchain__query_docs_filesystem_docs_by_lang_chain",
+      "Bash(echo \"EXIT=$?\")",
+      "WebFetch(domain:developers.cloudflare.com)",
+      "Bash(echo \"TSC=$?\")",
+      "Bash(curl -s \"https://generativelanguage.googleapis.com/v1beta/openai/models\" -H \"Authorization: Bearer AIzaSyA6Mg3TWR65ARxlUhSqdN9K-84tFq2EjoA\")",
+      "Bash(curl -s -X POST https://generativelanguage.googleapis.com/v1beta/openai/chat/completions -H 'Authorization: Bearer AIzaSyA6Mg3TWR65ARxlUhSqdN9K-84tFq2EjoA' -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(curl -s -X POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=AIzaSyA6Mg3TWR65ARxlUhSqdN9K-84tFq2EjoA -H 'Content-Type: application/json' -d '{ *)"
     ]
   },
   "enabledMcpjsonServers": [
