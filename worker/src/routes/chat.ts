@@ -14,6 +14,7 @@ import { runAgentLoop } from "@/services/agent";
 import { authenticateRequest } from "@/services/auth";
 import { SupabaseChatMessageHistory } from "@/services/chat-history";
 import { createSupabaseClient } from "@/services/supabase";
+import { createTracing } from "@/services/tracing";
 import { chatRequestSchema, type ChatAttachment } from "@/types/chat";
 import { categoryListSchema } from "@/types/expense";
 
@@ -21,10 +22,13 @@ export async function handleChat(
   req: Request,
   env: Env,
   cors: Record<string, string>,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   if (req.method !== "POST") {
     return jsonResponse({ error: "Method not allowed" }, 405, cors);
   }
+
+  const tracing = createTracing(env);
 
   try {
     const auth = await authenticateRequest(req, env);
@@ -40,7 +44,9 @@ export async function handleChat(
     const parseResult = chatRequestSchema.safeParse(rawBody);
     if (!parseResult.success) {
       return jsonResponse(
-        { error: parseResult.error.issues[0]?.message ?? "Invalid request body" },
+        {
+          error: parseResult.error.issues[0]?.message ?? "Invalid request body",
+        },
         400,
         cors,
       );
@@ -61,7 +67,9 @@ export async function handleChat(
       return jsonResponse({ error: "Failed to load categories" }, 500, cors);
     }
 
-    const categoryText = formatCategoryList(categoryListSchema.parse(categories ?? []));
+    const categoryText = formatCategoryList(
+      categoryListSchema.parse(categories ?? []),
+    );
     const email = auth.user.email ?? "";
     const llm = resolveChatModel(env);
 
@@ -77,7 +85,10 @@ export async function handleChat(
         messages,
         supabase,
         enableTools: false,
+        callbacks: tracing?.callbacks,
+        metadata: { mode: "analytics", userId: auth.user.id },
       });
+      if (tracing) ctx.waitUntil(tracing.flush());
       return jsonResponse(
         { message: result.text, pendingToolCalls: null, sessionId: null },
         200,
@@ -102,7 +113,14 @@ export async function handleChat(
       userMessage,
     ];
 
-    const result = await runAgentLoop({ llm, messages, supabase });
+    const result = await runAgentLoop({
+      llm,
+      messages,
+      supabase,
+      callbacks: tracing?.callbacks,
+      metadata: { mode: "chat", sessionId, userId: auth.user.id },
+    });
+    if (tracing) ctx.waitUntil(tracing.flush());
 
     for (const m of result.newMessages) {
       await history.addMessage(m);

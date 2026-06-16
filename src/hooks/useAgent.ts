@@ -26,19 +26,20 @@ export interface PendingToolCall {
 interface AgentResponse {
   message: string | null;
   pendingToolCalls?: PendingToolCall[];
+  sessionId?: string | null;
 }
 
 export function useAgent() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [pendingToolCalls, setPendingToolCalls] = useState<PendingToolCall[] | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   const sendMessage = async (text: string) => {
     if (loading || !text.trim()) return;
 
     const userMsg: ChatMessage = { role: "user", content: text.trim() };
-    const updated = [...messages, userMsg];
-    setMessages(updated);
+    setMessages((prev) => [...prev, userMsg]);
     setLoading(true);
     setPendingToolCalls(null);
 
@@ -56,12 +57,19 @@ export function useAgent() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session?.access_token}`,
         },
-        body: JSON.stringify({ messages: updated }),
+        body: JSON.stringify({
+          message: userMsg.content,
+          ...(sessionId ? { sessionId } : {}),
+        }),
       });
 
       if (!res.ok) throw new Error("Worker request failed");
 
       const data: AgentResponse = await res.json();
+
+      if (data.sessionId) {
+        setSessionId(data.sessionId);
+      }
 
       if (data.message) {
         setMessages((prev) => [
@@ -144,6 +152,7 @@ export function useAgent() {
   const clearMessages = () => {
     setMessages([]);
     setPendingToolCalls(null);
+    setSessionId(null);
   };
 
   return {

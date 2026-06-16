@@ -22,7 +22,7 @@ export function TransactionItem({
   const isExpense = expense.is_expense ?? true;
 
   const inner = (
-    <div className="flex items-center gap-3 py-2">
+    <div className="flex items-center gap-3 py-3">
       {selectable && (
         <div
           className={cn(
@@ -67,7 +67,7 @@ export function TransactionItem({
     return (
       <button
         onClick={onSelect}
-        className="w-full text-left hover:bg-accent rounded-lg px-1 transition-colors"
+        className="w-full text-left hover:bg-accent px-4 transition-colors"
       >
         {inner}
       </button>
@@ -78,12 +78,12 @@ export function TransactionItem({
     return (
       <Link
         href={`/dashboard/expenses/${expense.id}`}
-        className="block hover:bg-accent rounded-lg px-1 transition-colors"
+        className="block hover:bg-accent px-4 transition-colors"
       >
         {inner}
       </Link>
     );
   }
 
-  return <div className="px-1">{inner}</div>;
+  return <div className="px-4">{inner}</div>;
 }

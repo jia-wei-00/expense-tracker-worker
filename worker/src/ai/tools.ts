@@ -8,15 +8,30 @@ import { DB_TABLE } from "@/constants/db";
 import type { PendingAction } from "@/types/expense";
 
 /**
- * Thrown from a write-tool's `func` to signal that the action requires user
- * confirmation. The agent loop catches this, records the action, and returns
- * `pending_confirmation` to the model as the tool result.
+ * Sentinel value a write-tool returns to signal that its action requires user
+ * confirmation before execution. The agent loop detects it, records the action,
+ * and replies `pending_confirmation` to the model as the tool result.
+ *
+ * Returned (not thrown) so the tool run is traced as a normal success rather
+ * than an error — the confirmation gate is expected control flow, not a fault.
  */
-export class PendingActionInterrupt extends Error {
-  constructor(public readonly action: PendingAction) {
-    super("Pending action requires confirmation");
-    this.name = "PendingActionInterrupt";
-  }
+export interface PendingActionResult {
+  readonly pendingAction: PendingAction;
+}
+
+export function pendingAction(action: PendingAction): PendingActionResult {
+  return { pendingAction: action };
+}
+
+export function isPendingActionResult(
+  value: unknown,
+): value is PendingActionResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "pendingAction" in value &&
+    typeof (value as { pendingAction: unknown }).pendingAction === "object"
+  );
 }
 
 // ─── Tool input schemas ──────────────────────────────────────────────────────
@@ -104,7 +119,7 @@ export function createExpenseTools(
 ): DynamicStructuredTool[] {
   const addExpense = tool(
     (args) => {
-      throw new PendingActionInterrupt({
+      return pendingAction({
         toolName: TOOL_NAME.ADD_EXPENSE,
         args: {
           name: args.name,
@@ -138,7 +153,7 @@ export function createExpenseTools(
       if (!expense.success) {
         return JSON.stringify({ error: `Expense with ID ${args.id} not found` });
       }
-      throw new PendingActionInterrupt({
+      return pendingAction({
         toolName: TOOL_NAME.DELETE_EXPENSE,
         args: { id: expense.data.id, name: expense.data.name },
       });

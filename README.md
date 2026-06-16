@@ -132,6 +132,7 @@ WHATSAPP_VERIFY_TOKEN=...
 WHATSAPP_ACCESS_TOKEN=...
 WHATSAPP_PHONE_NUMBER_ID=...
 WHATSAPP_APP_SECRET=...
+LANGSMITH_API_KEY=...   # optional — only needed if LANGSMITH_TRACING="true"
 ```
 
 **Production — upload each secret once via Wrangler.** `.dev.vars` is local-only; production reads from Cloudflare's encrypted secret store:
@@ -149,6 +150,10 @@ npx wrangler secret put WHATSAPP_VERIFY_TOKEN --config worker/wrangler.jsonc
 npx wrangler secret put WHATSAPP_ACCESS_TOKEN --config worker/wrangler.jsonc
 npx wrangler secret put WHATSAPP_PHONE_NUMBER_ID --config worker/wrangler.jsonc
 npx wrangler secret put WHATSAPP_APP_SECRET --config worker/wrangler.jsonc
+
+# LangSmith tracing (optional) — set LANGSMITH_TRACING="true" in wrangler.jsonc,
+# then upload the API key. For non-US regions also set LANGSMITH_ENDPOINT.
+npx wrangler secret put LANGSMITH_API_KEY --config worker/wrangler.jsonc
 ```
 
 ### 4. Run the development servers

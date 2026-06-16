@@ -25,5 +25,11 @@
     "ALLOWED_ORIGIN": "",
     "AI_PROVIDER": "gemini",
     "WHATSAPP_TEMPLATE_NAME": "expense_tracker_verify",
+
+    // LangSmith tracing. Set to "true" to enable; the LANGSMITH_API_KEY secret
+    // must also be set (`wrangler secret put LANGSMITH_API_KEY`). For non-US
+    // regions also set LANGSMITH_ENDPOINT (e.g. https://eu.api.smith.langchain.com).
+    "LANGSMITH_TRACING": "true",
+    "LANGSMITH_PROJECT": "expense-tracker",
   },
 }

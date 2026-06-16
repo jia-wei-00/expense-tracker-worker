@@ -48,7 +48,10 @@
       "Bash(echo \"TSC=$?\")",
       "Bash(curl -s \"https://generativelanguage.googleapis.com/v1beta/openai/models\" -H \"Authorization: Bearer AIzaSyA6Mg3TWR65ARxlUhSqdN9K-84tFq2EjoA\")",
       "Bash(curl -s -X POST https://generativelanguage.googleapis.com/v1beta/openai/chat/completions -H 'Authorization: Bearer AIzaSyA6Mg3TWR65ARxlUhSqdN9K-84tFq2EjoA' -H 'Content-Type: application/json' -d '{ *)",
-      "Bash(curl -s -X POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=AIzaSyA6Mg3TWR65ARxlUhSqdN9K-84tFq2EjoA -H 'Content-Type: application/json' -d '{ *)"
+      "Bash(curl -s -X POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=AIzaSyA6Mg3TWR65ARxlUhSqdN9K-84tFq2EjoA -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(curl -s -X POST https://generativelanguage.googleapis.com/v1beta/openai/chat/completions -H 'Authorization: Bearer AIzaSyA6Mg3TWR65ARxlUhSqdN9K-84tFq2EjoA' -H 'Content-Type: application/json' -d '{\"model\":\"gemini-3.1-flash-lite\",\"messages\":[{\"role\":\"user\",\"content\":\"Ttf\"}]}' -w '\\\\n---HTTP_STATUS:%{http_code}\\\\n')",
+      "Bash(awk *)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-Object -First 30)"
     ]
   },
   "enabledMcpjsonServers": [

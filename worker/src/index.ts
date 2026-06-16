@@ -8,7 +8,11 @@ import { handleWhatsAppWebhook } from "@/routes/whatsapp-webhook";
 export type { Env } from "@/env";
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(
+    req: Request,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const origin = req.headers.get("Origin") ?? "*";
     const cors = corsHeaders(origin, env.ALLOWED_ORIGIN || "*");
 
@@ -26,7 +30,7 @@ export default {
       case "/whatsapp/resend-verification":
         return handleWhatsAppResend(req, env, cors);
       case "/chat":
-        return handleChat(req, env, cors);
+        return handleChat(req, env, cors, ctx);
       default:
         return jsonResponse({ error: "Not found" }, 404, cors);
     }

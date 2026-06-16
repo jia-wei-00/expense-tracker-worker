@@ -69,7 +69,7 @@ Be concise, specific, and encouraging. Focus on the largest expense categories.`
           Authorization: `Bearer ${session?.access_token}`,
         },
         body: JSON.stringify({
-          messages: [{ role: "user", content: prompt }],
+          message: prompt,
           analyticsMode: true,
         }),
       });

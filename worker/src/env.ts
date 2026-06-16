@@ -11,4 +11,10 @@ export interface Env {
   WHATSAPP_PHONE_NUMBER_ID: string;
   WHATSAPP_APP_SECRET: string;
   WHATSAPP_TEMPLATE_NAME: string;
+  // LangSmith tracing (optional). Set LANGSMITH_TRACING="true" to enable.
+  LANGSMITH_TRACING?: string;
+  LANGSMITH_API_KEY?: string;
+  LANGSMITH_PROJECT?: string;
+  /** Region API URL, e.g. https://eu.api.smith.langchain.com. Omit for US. */
+  LANGSMITH_ENDPOINT?: string;
 }

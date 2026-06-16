@@ -22,14 +22,22 @@ export default function LoginPage() {
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      toast.error(error.message);
-    } else {
-      router.push("/dashboard");
-      router.refresh();
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (error) {
+        toast.error(error.message);
+      } else {
+        router.push("/dashboard");
+        router.refresh();
+      }
+    } catch (err) {
+      toast.error(String(err));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleSignUp = async (e: React.FormEvent) => {

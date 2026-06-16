@@ -4,9 +4,10 @@ import {
   type AIMessageChunk,
   type BaseMessage,
 } from "@langchain/core/messages";
+import type { Callbacks } from "@langchain/core/callbacks/manager";
 import type { ChatOpenAI } from "@langchain/openai";
 import { MAX_LLM_STEPS, PENDING_CONFIRMATION_REPLY } from "@/constants/app";
-import { createExpenseTools, PendingActionInterrupt } from "@/ai/tools";
+import { createExpenseTools, isPendingActionResult } from "@/ai/tools";
 import type { PendingAction } from "@/types/expense";
 
 export interface AgentLoopResult {
@@ -22,6 +23,10 @@ interface RunAgentLoopParams {
   supabase: SupabaseClient;
   userId?: string;
   enableTools?: boolean;
+  /** LangSmith (or other) callbacks; forwarded to every LLM/tool invocation. */
+  callbacks?: Callbacks;
+  /** Run metadata attached to LangSmith traces (e.g. sessionId, mode). */
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -36,17 +41,20 @@ export async function runAgentLoop({
   supabase,
   userId,
   enableTools = true,
+  callbacks,
+  metadata,
 }: RunAgentLoopParams): Promise<AgentLoopResult> {
   const tools = createExpenseTools(supabase, userId);
   const toolsByName = new Map(tools.map((t) => [t.name, t]));
   const llmWithTools = enableTools ? llm.bindTools(tools) : llm;
+  const config = { callbacks, metadata };
 
   const working: BaseMessage[] = [...messages];
   const newMessages: BaseMessage[] = [];
   const pendingActions: PendingAction[] = [];
 
   for (let step = 0; step < MAX_LLM_STEPS; step++) {
-    const aiMessage: AIMessageChunk = await llmWithTools.invoke(working);
+    const aiMessage: AIMessageChunk = await llmWithTools.invoke(working, config);
     working.push(aiMessage);
     newMessages.push(aiMessage);
 
@@ -81,22 +89,18 @@ export async function runAgentLoop({
         continue;
       }
 
-      try {
-        const result = await tool.invoke(tc.args);
+      const result = await tool.invoke(tc.args, config);
+      if (isPendingActionResult(result)) {
+        pendingActions.push(result.pendingAction);
+        pushToolMessage(
+          working,
+          newMessages,
+          PENDING_CONFIRMATION_REPLY,
+          toolCallId,
+          tc.name,
+        );
+      } else {
         pushToolMessage(working, newMessages, stringify(result), toolCallId, tc.name);
-      } catch (err) {
-        if (err instanceof PendingActionInterrupt) {
-          pendingActions.push(err.action);
-          pushToolMessage(
-            working,
-            newMessages,
-            PENDING_CONFIRMATION_REPLY,
-            toolCallId,
-            tc.name,
-          );
-        } else {
-          throw err;
-        }
       }
     }
 
