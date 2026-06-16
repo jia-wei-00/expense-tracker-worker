@@ -81,7 +81,7 @@ export class SupabaseChatMessageHistory extends BaseListChatMessageHistory {
 function toStoredMessage(row: ChatMessageRow): StoredMessage {
   const data = isRecord(row.data) ? row.data : {};
   const storedData: StoredMessageData = {
-    content: stringOr(data.content, ""),
+    content: toMessageContent(data.content),
     role: stringOrUndefined(data.role),
     name: stringOrUndefined(data.name),
     tool_call_id: stringOrUndefined(data.tool_call_id),
@@ -94,6 +94,21 @@ function toStoredMessage(row: ChatMessageRow): StoredMessage {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Message content is either a plain string or an array of content blocks
+ * (text/image/etc. for multimodal messages). Preserve both shapes — coercing
+ * arrays to a string would silently drop image attachments from history.
+ *
+ * `StoredMessageData.content` is typed `string`, but LangChain's mapper feeds
+ * it straight into the message constructor, which accepts arrays at runtime.
+ * The cast keeps array content intact despite the too-narrow declared type.
+ */
+function toMessageContent(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value as unknown as string;
+  return "";
 }
 
 function stringOr(value: unknown, fallback: string): string {
