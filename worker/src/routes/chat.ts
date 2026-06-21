@@ -104,7 +104,7 @@ export async function handleChat(
 
     const history = new SupabaseChatMessageHistory(supabase, sessionId);
     const priorMessages = await history.getMessages();
-    const userMessage = buildUserMessage(message, attachments);
+    const userMessage = await buildUserMessage(message, attachments);
     await history.addMessage(userMessage);
 
     const messages: BaseMessage[] = [
@@ -152,10 +152,13 @@ export async function handleChat(
   }
 }
 
-function buildUserMessage(
+/** Cap on audio attachment size (bytes) the worker will inline as base64. */
+const MAX_AUDIO_BYTES = 15 * 1024 * 1024;
+
+async function buildUserMessage(
   text: string,
   attachments: ChatAttachment[] | undefined,
-): HumanMessage {
+): Promise<HumanMessage> {
   if (!attachments || attachments.length === 0) {
     return new HumanMessage(text);
   }
@@ -165,16 +168,54 @@ function buildUserMessage(
   }
   for (const a of attachments) {
     if (a.contentType.startsWith("image/")) {
+      // Images are passed by URL — the provider fetches them itself.
       content.push({
         type: "image",
         source_type: "url",
         url: a.url,
         mime_type: a.contentType,
       });
+    } else if (a.contentType.startsWith("audio/")) {
+      // The OpenAI-compatible `input_audio` API has no URL input, so the audio
+      // must be inlined as base64. Fetch it here and normalise the MIME type to
+      // the wav/mp3 the model accepts (`audio/mpeg` → `audio/mp3`).
+      const data = await fetchAsBase64(a.url, MAX_AUDIO_BYTES);
+      content.push({
+        type: "audio",
+        source_type: "base64",
+        data,
+        mime_type: a.contentType === "audio/mpeg" ? "audio/mp3" : a.contentType,
+      });
     }
-    // Future media types (audio/file) get their own branches here.
+    // Future media types (file/video) get their own branches here.
   }
   return new HumanMessage({ content });
+}
+
+/** Fetches a URL and returns its body base64-encoded, enforcing a size cap. */
+async function fetchAsBase64(url: string, maxBytes: number): Promise<string> {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch attachment (${res.status})`);
+  }
+  const buffer = await res.arrayBuffer();
+  if (buffer.byteLength > maxBytes) {
+    throw new Error(
+      `Attachment too large: ${buffer.byteLength} bytes (max ${maxBytes})`,
+    );
+  }
+  return arrayBufferToBase64(buffer);
+}
+
+/** Encodes an ArrayBuffer to base64, chunking to avoid call-stack limits. */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
 }
 
 async function ensureSession(

@@ -3,12 +3,30 @@ import { z } from "zod";
 /** Max number of attachments the worker accepts per turn. */
 export const MAX_ATTACHMENTS_PER_TURN = 4;
 
-/** MIME types the worker knows how to forward to the LLM. */
-export const allowedAttachmentMimeSchema = z.enum([
+/** Image MIME types the worker forwards to the LLM (sent as URLs). */
+export const allowedImageMimeSchema = z.enum([
   "image/jpeg",
   "image/png",
   "image/webp",
   "image/gif",
+]);
+
+/**
+ * Audio MIME types the worker forwards to the LLM. The OpenAI-compatible
+ * `input_audio` API only accepts wav/mp3, so we restrict to those. `audio/mpeg`
+ * is the standard MIME for .mp3 files and is normalised to `audio/mp3` before
+ * being sent to the model.
+ */
+export const allowedAudioMimeSchema = z.enum([
+  "audio/wav",
+  "audio/mp3",
+  "audio/mpeg",
+]);
+
+/** MIME types the worker knows how to forward to the LLM. */
+export const allowedAttachmentMimeSchema = z.union([
+  allowedImageMimeSchema,
+  allowedAudioMimeSchema,
 ]);
 
 export const attachmentSchema = z.object({

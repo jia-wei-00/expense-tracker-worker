@@ -73,6 +73,7 @@ export async function handleConfirmationReply(
 export async function savePendingAndAskConfirmation(
   from: string,
   actions: PendingAction[],
+  categoryNames: Map<number, string>,
   supabase: SupabaseClient,
   env: Env,
 ) {
@@ -88,7 +89,7 @@ export async function savePendingAndAskConfirmation(
 
   await sendInteractiveButtons(
     from,
-    buildConfirmationText(actions),
+    buildConfirmationText(actions, categoryNames),
     [
       { id: `${BUTTON_PREFIX.CONFIRM}${pendingId}`, title: "Confirm" },
       { id: `${BUTTON_PREFIX.CANCEL}${pendingId}`, title: "Cancel" },
@@ -142,20 +143,23 @@ async function executeBatch(
   return addError || deleteError ? `Partial success: ${summary}.` : `Done! ${summary}.`;
 }
 
-function buildConfirmationText(actions: PendingAction[]): string {
+function buildConfirmationText(
+  actions: PendingAction[],
+  categoryNames: Map<number, string>,
+): string {
+  const describe = (a: PendingAction): string => {
+    if (a.toolName === TOOL_NAME.ADD_EXPENSE) {
+      const category = categoryNames.get(a.args.category) ?? "Uncategorized";
+      const kind = a.args.is_expense ? "Add" : "Add income";
+      return `${kind} ${a.args.name} — RM${a.args.amount} (${category})`;
+    }
+    return `Delete ${a.args.name ?? `expense #${a.args.id}`}`;
+  };
+
   if (actions.length === 1) {
-    const a = actions[0];
-    return a.toolName === TOOL_NAME.ADD_EXPENSE
-      ? `Add "${a.args.name}" RM${a.args.amount}?`
-      : `Delete "${a.args.name ?? `expense #${a.args.id}`}"?`;
+    return `${describe(actions[0])}?`;
   }
 
-  const lines = actions.map((a, i) => {
-    const n = i + 1;
-    return a.toolName === TOOL_NAME.ADD_EXPENSE
-      ? `${n}. Add ${a.args.name} — RM${a.args.amount}`
-      : `${n}. Delete ${a.args.name ?? `expense #${a.args.id}`}`;
-  });
-
+  const lines = actions.map((a, i) => `${i + 1}. ${describe(a)}`);
   return `Confirm ${actions.length} actions?\n${lines.join("\n")}`;
 }

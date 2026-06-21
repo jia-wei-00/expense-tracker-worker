@@ -65,6 +65,8 @@ export async function handleWhatsAppMessage(
   // Always return 200 to Meta — non-200 causes it to retry and spam the endpoint
   if (!parsed) return new Response("OK", { status: 200 });
 
+  console.log(parsed, "here is parsed");
+
   const supabase = createServiceClient(
     env.SUPABASE_URL,
     env.SUPABASE_SERVICE_ROLE_KEY,
@@ -116,7 +118,13 @@ export async function handleWhatsAppMessage(
     } else if (parsed.type === "text" && parsed.text) {
       await runWhatsAppAgent(parsed.from, parsed.text, userId, supabase, env);
     } else if (parsed.type === "audio" && parsed.mediaId) {
-      await handleAudioMessage(parsed.from, parsed.mediaId, userId, supabase, env);
+      await handleAudioMessage(
+        parsed.from,
+        parsed.mediaId,
+        userId,
+        supabase,
+        env,
+      );
     } else if (parsed.type === "image" && parsed.mediaId) {
       await handleImageMessage(
         parsed.from,
@@ -214,10 +222,11 @@ async function runWhatsAppAgent(
   ]);
 
   const email = userData?.user?.email ?? "";
-  const categoryText = formatCategoryList(
-    categoryListSchema.parse(categories ?? []),
-  );
+  const categoryList = categoryListSchema.parse(categories ?? []);
+  const categoryText = formatCategoryList(categoryList);
+  const categoryNames = new Map(categoryList.map((c) => [c.id, c.name]));
 
+  // Stateless: each WhatsApp message is handled on its own, with no history.
   const llm = resolveChatModel(env);
   const messages: BaseMessage[] = [
     new SystemMessage(buildAgentSystemPrompt(email, categoryText)),
@@ -231,6 +240,7 @@ async function runWhatsAppAgent(
       await savePendingAndAskConfirmation(
         from,
         result.pendingActions,
+        categoryNames,
         supabase,
         env,
       );
