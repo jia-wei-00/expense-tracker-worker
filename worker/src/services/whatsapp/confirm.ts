@@ -10,6 +10,7 @@ import {
   type PendingAction,
 } from "@/types/expense";
 import { sendInteractiveButtons, sendTextMessage } from "@/services/whatsapp/api";
+import { sendExpenseAddedPush, type AddedExpense } from "@/services/whatsapp/push";
 
 /**
  * Handle the Confirm/Cancel button reply for a batch of pending actions.
@@ -112,13 +113,13 @@ async function executeBatch(
     else deleteIds.push(action.args.id);
   }
 
-  const [addError, deleteError] = await Promise.all([
+  const [addResult, deleteError] = await Promise.all([
     adds.length > 0
       ? supabase
           .from(DB_TABLE.EXPENSE)
           .insert(adds.map((a) => ({ ...a, user_id: userId })))
-          .then((r) => r.error)
-      : Promise.resolve(null),
+          .select("id, name, amount")
+      : Promise.resolve({ data: [], error: null }),
     deleteIds.length > 0
       ? supabase
           .from(DB_TABLE.EXPENSE)
@@ -128,6 +129,14 @@ async function executeBatch(
           .then((r) => r.error)
       : Promise.resolve(null),
   ]);
+
+  const addError = addResult.error;
+  const addedRows = (addResult.data ?? []) as AddedExpense[];
+
+  // Notify the linked device that expenses were added (best-effort).
+  if (!addError && addedRows.length > 0) {
+    await notifyExpensesAdded(userId, addedRows, supabase);
+  }
 
   const parts: string[] = [];
   if (adds.length > 0) {
@@ -141,6 +150,21 @@ async function executeBatch(
 
   const summary = parts.join(", ");
   return addError || deleteError ? `Partial success: ${summary}.` : `Done! ${summary}.`;
+}
+
+/** Looks up the user's push token and sends an "expense added" notification. */
+async function notifyExpensesAdded(
+  userId: string,
+  expenses: AddedExpense[],
+  supabase: SupabaseClient,
+): Promise<void> {
+  const { data } = await supabase
+    .from(DB_TABLE.WHATSAPP_USERS)
+    .select("push_token")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  await sendExpenseAddedPush(data?.push_token as string | null | undefined, expenses);
 }
 
 function buildConfirmationText(
