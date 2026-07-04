@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import dayjs from "dayjs";
 import { TOOL_NAME } from "@/constants/ai";
 import { BUTTON_PREFIX } from "@/constants/whatsapp";
 import { DB_TABLE } from "@/constants/db";
@@ -9,8 +10,14 @@ import {
   type AddExpenseArgs,
   type PendingAction,
 } from "@/types/expense";
-import { sendInteractiveButtons, sendTextMessage } from "@/services/whatsapp/api";
-import { sendExpenseAddedPush, type AddedExpense } from "@/services/whatsapp/push";
+import {
+  sendInteractiveButtons,
+  sendTextMessage,
+} from "@/services/whatsapp/api";
+import {
+  sendExpenseAddedPush,
+  type AddedExpense,
+} from "@/services/whatsapp/push";
 
 /**
  * Handle the Confirm/Cancel button reply for a batch of pending actions.
@@ -37,7 +44,11 @@ export async function handleConfirmationReply(
       .from(DB_TABLE.WHATSAPP_PENDING_ACTIONS)
       .delete()
       .eq("id", pendingId);
-    await sendTextMessage(from, "Cancelled. Anything else I can help with?", env);
+    await sendTextMessage(
+      from,
+      "Cancelled. Anything else I can help with?",
+      env,
+    );
     return;
   }
 
@@ -50,7 +61,11 @@ export async function handleConfirmationReply(
     .maybeSingle();
 
   if (!pending) {
-    await sendTextMessage(from, "This action has expired. Please try again.", env);
+    await sendTextMessage(
+      from,
+      "This action has expired. Please try again.",
+      env,
+    );
     return;
   }
 
@@ -65,7 +80,11 @@ export async function handleConfirmationReply(
     return;
   }
 
-  await sendTextMessage(from, await executeBatch(parsed.data, userId, supabase), env);
+  await sendTextMessage(
+    from,
+    await executeBatch(parsed.data, userId, supabase),
+    env,
+  );
 }
 
 /**
@@ -140,16 +159,22 @@ async function executeBatch(
 
   const parts: string[] = [];
   if (adds.length > 0) {
-    parts.push(addError ? `failed to add ${adds.length}` : `added ${adds.length}`);
+    parts.push(
+      addError ? `failed to add ${adds.length}` : `added ${adds.length}`,
+    );
   }
   if (deleteIds.length > 0) {
     parts.push(
-      deleteError ? `failed to delete ${deleteIds.length}` : `deleted ${deleteIds.length}`,
+      deleteError
+        ? `failed to delete ${deleteIds.length}`
+        : `deleted ${deleteIds.length}`,
     );
   }
 
   const summary = parts.join(", ");
-  return addError || deleteError ? `Partial success: ${summary}.` : `Done! ${summary}.`;
+  return addError || deleteError
+    ? `Partial success: ${summary}.`
+    : `Done! ${summary}.`;
 }
 
 /** Looks up the user's push token and sends an "expense added" notification. */
@@ -164,7 +189,10 @@ async function notifyExpensesAdded(
     .eq("user_id", userId)
     .maybeSingle();
 
-  await sendExpenseAddedPush(data?.push_token as string | null | undefined, expenses);
+  await sendExpenseAddedPush(
+    data?.push_token as string | null | undefined,
+    expenses,
+  );
 }
 
 function buildConfirmationText(
@@ -175,7 +203,9 @@ function buildConfirmationText(
     if (a.toolName === TOOL_NAME.ADD_EXPENSE) {
       const category = categoryNames.get(a.args.category) ?? "Uncategorized";
       const kind = a.args.is_expense ? "Add" : "Add income";
-      return `${kind} ${a.args.name} — RM${a.args.amount} (${category})`;
+      const date = formatSpendDate(a.args.spend_date);
+      const on = date ? `(${date})` : "";
+      return `${kind} ${a.args.name} — RM${a.args.amount} (${category})${on}`;
     }
     return `Delete ${a.args.name ?? `expense #${a.args.id}`}`;
   };
@@ -186,4 +216,10 @@ function buildConfirmationText(
 
   const lines = actions.map((a, i) => `${i + 1}. ${describe(a)}`);
   return `Confirm ${actions.length} actions?\n${lines.join("\n")}`;
+}
+
+/** Formats an ISO spend_date as "DD MMM YYYY", or "" if unparseable. */
+function formatSpendDate(iso: string): string {
+  const d = dayjs(iso);
+  return d.isValid() ? d.format("DD MMM YYYY") : "";
 }
